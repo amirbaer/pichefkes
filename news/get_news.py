@@ -47,32 +47,41 @@ def get_news_items(query, dewey=[]):
             news.title.text,
             news.link.text,
             news.pubdate.text,
+            news.description.text,
             query,
             dewey
         ))
 
     return news_items
 
-def print_news(news_items):
-    for item in news_items:
-      print(item.title)
-      print(item.link)
-      print(item.date)
-      print(item.query)
-      print("-"*60)
+def get_html_link(item):
+    return '<a href="%s">%s</a>' % (item.link, item.title)
 
+def get_excel_link(item):
+    return '=HYPERLINK("%s", "%s")' % (item.link, item.title)
 
 def save_as_html(filename, ml):
-    html = ""
+    html = """
+    <table style='width:100%'>
+    <tr>
+        <th>date</th>
+        <th>subject</th>
+        <th>query</th>
+        <th>header</th>
+    </tr>
+    """
     for (cn, v, cat), items in ml.items():
-        html += "<br><h2>%s :: %s :: %s</h2><br>\n" % (cn, v, cat)
+        for item in sorted(items, key=lambda i: i.date, reverse=True):
+            html += """
+            <tr>
+                <td>%s</td>
+                <td>%s</td>
+                <td>%s</td>
+                <td>%s</td>
+            </tr>
+            """ % (item.date.strftime("%Y-%m-%d"), cn, item.original_query, get_html_link(item))
 
-        if items:
-            html += "<br><h4>%s (%s)</h4><br>\n" % (items[0].original_query, len(items))
-            for item in sorted(items, key=lambda i: i.date, reverse=True):
-                html += '[%s] ' % (item.date.strftime("%Y-%m-%d"))
-                html += '<a href="%s">%s</a><br>\n' % (item.link, item.title)
-
+    html += "</table>\n" 
     open(filename, 'w').write(html)
 
 
@@ -100,7 +109,6 @@ def update(limit=None):
                         res[(cn, v, cat)].append(item)
                         titles_seen.add(title)
 
-                        print((cn, v, cat), len(res[(cn, v, cat)]), limit)
                         if limit and len(res[(cn, v, cat)]) >= limit:
                             print("query limit reached: '%s'" % fq)
                             break
