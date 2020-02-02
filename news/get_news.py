@@ -16,6 +16,10 @@ coins = coins[:1]
 verticals = verticals[:2]
 selection = selection[:1]
 
+#### PARAMS #####
+
+LIMIT_RESULTS_PER_QUERY = 20
+
 #################
 
 def get_query_url(query):
@@ -64,14 +68,15 @@ def save_as_html(filename, ml):
         html += "<br><h2>%s :: %s :: %s</h2><br>\n" % (cn, v, cat)
 
         if items:
-            html += "<br><h4>%s</h4><br>\n" % items[0].original_query
-            for item in items:
+            html += "<br><h4>%s (%s)</h4><br>\n" % (items[0].original_query, len(items))
+            for item in sorted(items, key=lambda i: i.date, reverse=True):
+                html += '[%s] ' % (item.date.strftime("%Y-%m-%d"))
                 html += '<a href="%s">%s</a><br>\n' % (item.link, item.title)
 
     open(filename, 'w').write(html)
 
 
-def update():
+def update(limit=None):
     # dict: { (cn, v, cat): [item, item, ...] }
     res = {}
     titles_seen = set()
@@ -94,13 +99,18 @@ def update():
 
                         res[(cn, v, cat)].append(item)
                         titles_seen.add(title)
+
+                        print((cn, v, cat), len(res[(cn, v, cat)]), limit)
+                        if limit and len(res[(cn, v, cat)]) >= limit:
+                            print("query limit reached: '%s'" % fq)
+                            break
     return res
 
 
 ########## MAIN ###########
 
-def main(out_filename):
-    ml = update()
+def main(out_filename, limit):
+    ml = update(limit)
     save_as_html(out_filename, ml)
 
 if __name__ == "__main__":
@@ -108,4 +118,8 @@ if __name__ == "__main__":
         print("usage: %s <output filename>" % sys.argv[0])
         sys.exit(1)
 
-    main(sys.argv[1])
+    limit = LIMIT_RESULTS_PER_QUERY
+    if len(sys.argv) > 2:
+        limit = int(sys.argv[2])
+
+    main(sys.argv[1], limit)
