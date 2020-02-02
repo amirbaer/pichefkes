@@ -80,7 +80,7 @@ def update(tqs, lpt=None, lpq=None):
 
     for t, qs in tqs.items():
         print("Topic: %s" % t)
-        total_per_topic = 0
+        topic_articles = []
         for q in qs:
             total_per_query = 0
             for item in get_news_items(t, q):
@@ -89,23 +89,19 @@ def update(tqs, lpt=None, lpq=None):
                     print("-> skipping: %s" % title)
                     continue
 
-                articles.append(item)
+                topic_articles.append(item)
                 titles_seen.add(title)
-
-                total_per_topic += 1
                 total_per_query += 1
 
                 if lpq and total_per_query >= lpq:
                     print("-> query limit reached: '%s'" % q)
                     break
 
-                if lpt and total_per_topic >= lpt:
-                    print("-> [XXX] topic limit reached: '%s'" % t)
-                    break
-
-            if lpt and total_per_topic >= lpt:
-                print("-> [XXX] topic limit reached: '%s'" % t)
-                break
+        topic_articles = sorted(topic_articles, key=lambda a: a.date, reverse=True)
+        if lpt and len(topic_articles) >= lpt:
+            print("-> [XXX] topic limit surpassed: %s" % len(topic_articles))
+            topic_articles = topic_articles[:lpt]
+        articles += topic_articles
 
     return articles
 
