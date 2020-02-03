@@ -26,7 +26,7 @@ class Item:
 
     def get_bolded_title(self):
         parts = []
-        for word in self.title.split(" "):
+        for word in self.title.replace("-", " ").split(" "):
             search_word = "".join([c.lower() for c in word if c.isalnum()])
             if search_word in self.original_query.lower():
                 word = "<b>%s</b>" % word
