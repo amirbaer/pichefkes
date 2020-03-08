@@ -3,138 +3,155 @@
 import bs4
 from bs4 import BeautifulSoup as soup
 import datetime
+from newsapi import NewsApiClient
 import urllib.parse as urlparse
 from urllib.parse import urlencode
 from urllib.request import urlopen
 import sys
 
 from queries import topic_queries
-from news_item import Item
+from news_item import Article
 
 #### PARAMS #####
 
-LIMIT_RESULTS_PER_QUERY = 10
-LIMIT_RESULTS_PER_TOPIC = 100
+PAGE_SIZE = 20
+TIME_BACK_DAYS = 30
+LIMIT_PER_TOPIC = 30
+NEWSAPI_KEY = '96c080920fcb45d0ac17ad985534aeba'
 
 #################
 
-def get_query_url(query):
-    news_url="https://news.google.com/news/rss"
-    params = {'q': query, 'lang':'en'}
+class RunParams:
 
-    url_parts = list(urlparse.urlparse(news_url))
-    query_dict = dict(urlparse.parse_qsl(url_parts[4]))
-    query_dict.update(params)
+    def __init__(self, time_back_days, page_size, limit_per_topic, topic_filter=None):
+        self.tbd = time_back_days
+        self.ps = page_size
+        self.tf = topic_filter
+        self.lpt = limit_per_topic
 
-    url_parts[4] = urlencode(query_dict)
-    return urlparse.urlunparse(url_parts)
+    def __str__(self):
+        return str(self.__dict__)
 
-# TODO: paging
-def get_news_items(topic, query):
-    query_url = get_query_url(query)
-    client = urlopen(query_url)
-    xml_page = client.read()
-    client.close()
+    def __repr__(self):
+        return "RunParams: %s" % self.__str__()
 
-    news_items = []
-    soup_page = soup(xml_page, "html.parser")
-    for news in soup_page.findAll("item"):
-        news_items.append(Item(
-            news.title.text,
-            news.link.text,
-            news.pubdate.text,
-            news.description.text,
-            topic,
-            query,
-        ))
 
-    return news_items
+class NewsGetter:
 
-def save_as_html(filename, articles, lpt, lpq, topic="<none>"):
-    html = """
-    Date: %s
-    Limit per topic: %s
-    Limit per query: %s
-    Topic filter: %s
-    <p>
-    <table style='width:100%%'>
-    <tr>
-        <th width='100'>date</th>
-        <th>subject</th>
-        <th>query</th>
-        <th>header</th>
-    </tr>
-    """ % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), lpt, lpq, topic)
-    for item in sorted(articles, key=lambda a: (a.topic, a.original_query, a.date), reverse=True):
-            html += """
-            <tr>
-                <td>%s</td>
-                <td>%s</td>
-                <td>%s</td>
-                <td>%s</td>
-            </tr>
-            """ % (item.date.strftime("%Y-%m-%d"), item.topic, item.original_query, item.get_html_link(bt=True))
+    def __init__(self):
+        self.newsapi = NewsApiClient(api_key=NEWSAPI_KEY)
 
-    html += "</table>\n" 
-    open(filename, 'w').write(html)
+    def newsapi_get_articles(self, topic, query, run_params):
+        " Query NewsAPI and return the intersection between the sorted-by-popularity and the sorted-by-relevancy results"
+        query_params = dict(
+            q=query,
+            from_param=(datetime.datetime.now() - datetime.timedelta(days=run_params.tbd)).strftime("%Y-%m-%dT%H:%M:%S"),
+            language="en",
+            page_size=run_params.ps,
+        )
 
-def update(tqs, lpt=None, lpq=None, topic_filter=None):
-    articles = []
-    titles_seen = set()
+        by_pop = self.newsapi.get_everything(**query_params, sort_by="popularity")
+        by_rel = self.newsapi.get_everything(**query_params, sort_by="relevancy")
 
-    print("Limits: %s per topic, %s per query" % (lpt, lpq))
+        by_pop_titles = set(x["title"] for x in by_pop["articles"])
+        by_rel_titles = set(x["title"] for x in by_rel["articles"])
+        final_titles = by_pop_titles.intersection(by_rel_titles)
 
-    for t, qs in tqs.items():
-        if topic_filter and t != topic_filter.lower():
-            continue
-        print("Topic: %s" % t)
-        topic_articles = []
-        for q in qs:
-            total_per_query = 0
-            for item in get_news_items(t, q):
-                title = item.title
-                if title in titles_seen:
-                    print("-> skipping: %s" % title)
-                    continue
+        final_articles = []
+        for newsapi_article in by_pop["articles"] + by_rel["articles"]:
+            if newsapi_article["title"] in final_titles:
+                final_articles.append(Article(topic, query, newsapi_article))
 
-                topic_articles.append(item)
-                titles_seen.add(title)
-                total_per_query += 1
+        return final_articles
 
-                if lpq and total_per_query >= lpq:
-                    print("-> query limit reached: '%s'" % q)
-                    break
+    def get_articles(self, topic_queries, run_params):
+        articles = []
+        titles_seen = set()
 
-        topic_articles = sorted(topic_articles, key=lambda a: a.date, reverse=True)
-        if lpt and len(topic_articles) >= lpt:
-            print("-> [XXX] topic limit surpassed: %s" % len(topic_articles))
-            topic_articles = topic_articles[:lpt]
-        articles += topic_articles
+        print("RUN PARAMS: days back: %(tbd)s, page size: %(ps)s, limit per topic: %(lpt)s, topic filter: %(tf)s" % run_params.__dict__)
 
-    return articles
+        for topic, queries in topic_queries.items():
+            if run_params.tf and topic != run_params.tf.lower():
+                continue
+            print("Topic: %s" % topic)
+            topic_articles = []
+            for query in queries:
+                total_per_query = 0
+                for article in self.newsapi_get_articles(topic, query, run_params):
+                    title = article.title
+                    if title in titles_seen:
+                        print("-> skipping: %s" % title)
+                        continue
+
+                    topic_articles.append(article)
+                    titles_seen.add(title)
+                    total_per_query += 1
+
+            topic_articles = sorted(topic_articles, key=lambda a: a.date, reverse=True)
+            if run_params.lpt and len(topic_articles) >= run_params.lpt:
+                print("-> [XXX] topic limit (%s) surpassed (%s)" % (run_params.lpt,
+								    len(topic_articles)))
+                topic_articles = topic_articles[:run_params.lpt]
+            articles += topic_articles
+
+        return articles
+
+    def save_as_html(self, filename, articles, run_params):
+        html = """
+        Date: %s
+        Time back in days: %s
+        Page size: %s
+        Topic filter: %s
+        <p>
+        <table style='width:100%%'>
+        <tr>
+            <th width='100'>date</th>
+            <th>subject</th>
+            <th>query</th>
+            <th>header</th>
+        </tr>
+        """ % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_params.tbd, run_params.ps, run_params.tf or "<none>")
+        for article in sorted(articles, key=lambda a: (a.topic, a.query, a.date), reverse=True):
+                html += """
+                <tr>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                </tr>
+                """ % (article.date.strftime("%Y-%m-%d"), article.topic, article.query, article.get_html_link(bt=True))
+
+        html += "</table>\n" 
+        open(filename, 'w').write(html)
 
 
 ########## MAIN ###########
 
-def main(out_filename, lpt, lpq, topic=None):
-    articles = update(topic_queries, lpt, lpq, topic)
-    save_as_html(out_filename, articles, lpt, lpq, topic)
+def main(out_filename, run_params):
+    news_getter = NewsGetter()
+    articles = news_getter.get_articles(topic_queries, run_params)
+    news_getter.save_as_html(out_filename, articles, run_params)
+    print("Done.")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: %s <output filename> [<limit per topic>] [<limit per query>] [<topic>]" % sys.argv[0])
+        print("usage: %s <output filename> [<time back days>] [<page size>] [<limit per topic>] [<topic_filter>]" % sys.argv[0])
         sys.exit(1)
 
-    lpt = LIMIT_RESULTS_PER_TOPIC
+    tbd = TIME_BACK_DAYS
     if len(sys.argv) > 2:
-        lpt = int(sys.argv[2])
+        tbd = int(sys.argv[2])
 
-    lpq = LIMIT_RESULTS_PER_QUERY
+    ps = PAGE_SIZE
     if len(sys.argv) > 3:
-        lpq = int(sys.argv[3])
+        ps = int(sys.argv[3])
 
-    topic = None
+    lpt = LIMIT_PER_TOPIC
     if len(sys.argv) > 4:
-        topic = sys.argv[4]
+        lpt = sys.argv[4]
 
-    main(sys.argv[1], lpt, lpq, topic)
+    topic_filter = None
+    if len(sys.argv) > 5:
+        topic_filter = sys.argv[5]
+
+    main(sys.argv[1], RunParams(tbd, ps, lpt, topic_filter))

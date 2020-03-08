@@ -1,20 +1,17 @@
 from datetime import datetime
 import re
 
-class Item:
-    def __init__(self, title, link, date, description, topic, original_query):
-        self.title = title
-        self.link = link
-        self.date = datetime.strptime(date, "%a, %d %b %Y %H:%M:%S %Z") 
-        self.description = description
 
+class Article:
+    def __init__(self, topic, query, newsapi_article):
         self.topic = topic
-        self.original_query = original_query
+        self.query = query
 
-        if not self.link:
-            desc_link_res = re.findall(r'a href="([^"]*)"', self.description)
-            if desc_link_res:
-                self.link = desc_link_res[0]
+        self.title = newsapi_article["title"]
+        self.link = newsapi_article["url"]
+        self.date = datetime.strptime(newsapi_article["publishedAt"], "%Y-%m-%dT%H:%M:%SZ") 
+        self.description = newsapi_article["description"]
+
 
     def get_html_link(self, bt=False):
         title = self.get_bolded_title() if bt else self.title
