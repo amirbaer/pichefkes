@@ -72,13 +72,15 @@ def save_as_html(filename, articles):
     html += "</table>\n" 
     open(filename, 'w').write(html)
 
-def update(tqs, lpt=None, lpq=None):
+def update(tqs, lpt=None, lpq=None, topic_filter=None):
     articles = []
     titles_seen = set()
 
     print("Limits: %s per topic, %s per query" % (lpt, lpq))
 
     for t, qs in tqs.items():
+        if topic_filter and t != topic_filter.lower():
+            continue
         print("Topic: %s" % t)
         topic_articles = []
         for q in qs:
@@ -108,13 +110,13 @@ def update(tqs, lpt=None, lpq=None):
 
 ########## MAIN ###########
 
-def main(out_filename, lpt, lpq):
-    articles = update(topic_queries, lpt, lpq)
+def main(out_filename, lpt, lpq, topic=None):
+    articles = update(topic_queries, lpt, lpq, topic)
     save_as_html(out_filename, articles)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: %s <output filename> [<limit per topic>] [<limit per query>]" % sys.argv[0])
+        print("usage: %s <output filename> [<limit per topic>] [<limit per query>] [<topic>]" % sys.argv[0])
         sys.exit(1)
 
     lpt = LIMIT_RESULTS_PER_TOPIC
@@ -125,4 +127,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 3:
         lpq = int(sys.argv[3])
 
-    main(sys.argv[1], lpt, lpq)
+    topic = None
+    if len(sys.argv) > 4:
+        topic = sys.argv[4]
+
+    main(sys.argv[1], lpt, lpq, topic)
