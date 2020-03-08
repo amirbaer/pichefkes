@@ -2,6 +2,7 @@
 
 import bs4
 from bs4 import BeautifulSoup as soup
+import datetime
 import urllib.parse as urlparse
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -49,16 +50,21 @@ def get_news_items(topic, query):
 
     return news_items
 
-def save_as_html(filename, articles):
+def save_as_html(filename, articles, lpt, lpq, topic="<none>"):
     html = """
-    <table style='width:100%'>
+    Date: %s
+    Limit per topic: %s
+    Limit per query: %s
+    Topic filter: %s
+    <p>
+    <table style='width:100%%'>
     <tr>
         <th width='100'>date</th>
         <th>subject</th>
         <th>query</th>
         <th>header</th>
     </tr>
-    """
+    """ % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), lpt, lpq, topic)
     for item in sorted(articles, key=lambda a: (a.topic, a.original_query, a.date), reverse=True):
             html += """
             <tr>
@@ -112,7 +118,7 @@ def update(tqs, lpt=None, lpq=None, topic_filter=None):
 
 def main(out_filename, lpt, lpq, topic=None):
     articles = update(topic_queries, lpt, lpq, topic)
-    save_as_html(out_filename, articles)
+    save_as_html(out_filename, articles, lpt, lpq, topic)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
