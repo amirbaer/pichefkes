@@ -3,34 +3,23 @@ topic_queries = {
         ## Coins
 
         "btc": (
+            "btc -price -analysis",
             "bitcoin",
-            "bitcoin top news",
-
-            "bitcoin development roadmap",
-            "bitcoin community discussion",
-            "bitcoin network attack",
-        
-            "bitcoin foundation",
+            "'bitcoin foundation'",
         ),
 
         "eth": (
+            "eth -price -analysis",
             "ethereum",
-            "ethereum top news",
-
-            "ethereum development roadmap",
-            "ethereum community discussion",
-            "ethereum network attack",
-        
             "'ethereum foundation'",
-
             "vitalik buterin",
         ),
         
             # EOS
         "eos": (
-            "eos -canon -eos.org",
+            "eos -canon -eos.org -price -analysis",
             "eosio crypto",
-            "eos 'block.one'",
+            "eos block.one",
             "'eos foundation' -eos.org",
         ),
 
@@ -44,26 +33,26 @@ topic_queries = {
 
             # LTC
         "ltc": (
-            "ltc litecoin",
-            "'litecoin core development team'",
-        ),
+            "litecoin",
+        ):
 
             # BCH
         "bch": (
-            "bch 'bitcoin cash'",
+            "bch -price -analysis",
+            '"bitcoin cash"',
         ),
 
             # BNB
         "bnb": (
-            "bnb binance",
-            "'binance charity foundation'",
+            "binance",
         ),
 
             # XLM
         "xlm": (
-            "xlm stellar",
-            "stellar lumens",
-            "'stellar development foundation'",
+            "xlm -price -analysis",
+            "stellar",
+            "stellar lumen",
+            "stellar crypto",
         ),
 
             # BSV
