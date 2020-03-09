@@ -17,17 +17,20 @@ from news_item import Article
 PAGE_SIZE = 100
 TIME_BACK_DAYS = 30
 LIMIT_PER_TOPIC = 30
+QINTITLE = True
 NEWSAPI_KEY = '96c080920fcb45d0ac17ad985534aeba'
 
 #################
 
 class RunParams:
 
-    def __init__(self, time_back_days, page_size, limit_per_topic, topic_filter=None):
+    def __init__(self, time_back_days, page_size, limit_per_topic, topic_filter=None,
+            qintitle=QINTITLE):
         self.tbd = time_back_days
         self.ps = page_size
         self.tf = topic_filter
         self.lpt = limit_per_topic
+        self.qintitle = qintitle
 
     def __str__(self):
         return str(self.__dict__)
@@ -50,6 +53,11 @@ class NewsGetter:
             page_size=run_params.ps,
             sort_by="relevancy",
         )
+
+        if run_params.qintitle:
+            query_params["qintitle"] = query
+        else:
+            query_params["q"] = query
 
         newsapi_articles = self.newsapi.get_everything(**query_params)["articles"]
         final_articles = [Article(topic, query, article) for article in newsapi_articles]
@@ -118,6 +126,7 @@ class NewsGetter:
         Time back in days: %s
         Page size: %s
         Topic filter: %s
+        Query title only: %s
         <p>
         <table style='width:100%%'>
         <tr>
@@ -129,7 +138,7 @@ class NewsGetter:
             <th>content</th>
         </tr>
         """ % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_params.tbd,
-                run_params.ps, run_params.tf or "<none>")
+                run_params.ps, run_params.tf or "<none>", run_params.qintitle)
         for article in sorted(articles, key=lambda a: (a.topic, a.query, a.date), reverse=True):
                 html += """
                 <tr>

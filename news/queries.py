@@ -3,8 +3,8 @@ topic_queries = {
         ## Coins
 
         "btc": (
-            "btc -price -analysis",
-            "bitcoin",
+            "btc -price -analysis -news",
+            "bitcoin -news -roundup",
             "'bitcoin foundation'",
         ),
 
@@ -34,7 +34,7 @@ topic_queries = {
             # LTC
         "ltc": (
             "litecoin",
-        ):
+        ),
 
             # BCH
         "bch": (
@@ -57,8 +57,11 @@ topic_queries = {
 
             # BSV
         "bsv": (
-            "bsv 'bitcoin satoshi'",
-            "dr craig s wright",
+            "bsv -price -analysis",
+            "bitcoinsv",
+            "bitcoin sv",
+            "bitcoin satoshi vision",
+            "craig wright",
             "calvin ayre",
             "nchain",
         ),
@@ -96,7 +99,7 @@ topic_queries = {
             "bitgo partners",
             "bitgo raised",
 
-            #"unbound tech",
+            "unbound tech",
             "unbound crypto",
             "unbound crypto partners",
             "unbound crypto raised",
