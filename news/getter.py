@@ -14,7 +14,7 @@ from news_item import Article
 
 #### PARAMS #####
 
-PAGE_SIZE = 20
+PAGE_SIZE = 100
 TIME_BACK_DAYS = 30
 LIMIT_PER_TOPIC = 30
 NEWSAPI_KEY = '96c080920fcb45d0ac17ad985534aeba'
@@ -44,24 +44,15 @@ class NewsGetter:
     def newsapi_get_articles(self, topic, query, run_params):
         " Query NewsAPI and return the intersection between the sorted-by-popularity and the sorted-by-relevancy results"
         query_params = dict(
-            q=query,
+            qintitle=query,
             from_param=(datetime.datetime.now() - datetime.timedelta(days=run_params.tbd)).strftime("%Y-%m-%dT%H:%M:%S"),
             language="en",
             page_size=run_params.ps,
+            sort_by="relevancy",
         )
 
-        by_pop = self.newsapi.get_everything(**query_params, sort_by="popularity")
-        by_rel = self.newsapi.get_everything(**query_params, sort_by="relevancy")
-
-        by_pop_titles = set(x["title"] for x in by_pop["articles"])
-        by_rel_titles = set(x["title"] for x in by_rel["articles"])
-        final_titles = by_pop_titles.intersection(by_rel_titles)
-
-        final_articles = []
-        for newsapi_article in by_pop["articles"] + by_rel["articles"]:
-            if newsapi_article["title"] in final_titles:
-                final_articles.append(Article(topic, query, newsapi_article))
-
+        newsapi_articles = self.newsapi.get_everything(**query_params)["articles"]
+        final_articles = [Article(topic, query, article) for article in newsapi_articles]
         return final_articles
 
     def get_articles(self, topic_queries, run_params):
@@ -77,7 +68,9 @@ class NewsGetter:
             topic_articles = []
             for query in queries:
                 total_per_query = 0
-                for article in self.newsapi_get_articles(topic, query, run_params):
+                newsapi_articles = self.newsapi_get_articles(topic, query, run_params)
+                print("%s articles retreived" % len(newsapi_articles))
+                for article in newsapi_articles:
                     title = article.title
                     if title in titles_seen:
                         print("-> skipping: %s" % title)

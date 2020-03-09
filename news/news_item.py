@@ -23,9 +23,9 @@ class Article:
 
     def get_bolded_title(self):
         parts = []
-        for word in self.title.replace("-", " ").split(" "):
+        for word in self.title.replace("-", " ").replace("'", "").split(" "):
             search_word = "".join([c.lower() for c in word if c.isalnum()])
-            if search_word in self.original_query.lower():
+            if search_word in self.query.lower():
                 word = "<b>%s</b>" % word
             parts.append(word)
 
