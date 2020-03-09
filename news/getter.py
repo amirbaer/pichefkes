@@ -67,9 +67,10 @@ class NewsGetter:
             print("Topic: %s" % topic)
             topic_articles = []
             for query in queries:
+                print("'%s': " % query, end="")
                 total_per_query = 0
                 newsapi_articles = self.newsapi_get_articles(topic, query, run_params)
-                print("%s articles retreived" % len(newsapi_articles))
+                print("%s" % len(newsapi_articles))
                 for article in newsapi_articles:
                     title = article.title
                     if title in titles_seen:
@@ -91,6 +92,28 @@ class NewsGetter:
 
     def save_as_html(self, filename, articles, run_params):
         html = """
+        <html>
+        <head><style>
+        td.date {
+            white-space: nowrap;
+            color: green;
+        }
+        td.query {
+            white-space: nowrap;
+            color: red;
+        }
+        td.source {
+            font-size: 10;
+            font-weight: bold;
+            color: orange;
+        }
+        td.header {
+            white-space: nowrap;
+        }
+        td.content {
+            white-space: nowrap;
+        }
+        </style></head>
         Date: %s
         Time back in days: %s
         Page size: %s
@@ -98,23 +121,29 @@ class NewsGetter:
         <p>
         <table style='width:100%%'>
         <tr>
-            <th width='100'>date</th>
+            <th>date</th>
             <th>subject</th>
             <th>query</th>
+            <th>source</th>
             <th>header</th>
+            <th>content</th>
         </tr>
-        """ % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_params.tbd, run_params.ps, run_params.tf or "<none>")
+        """ % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_params.tbd,
+                run_params.ps, run_params.tf or "<none>")
         for article in sorted(articles, key=lambda a: (a.topic, a.query, a.date), reverse=True):
                 html += """
                 <tr>
-                    <td>%s</td>
-                    <td>%s</td>
-                    <td>%s</td>
-                    <td>%s</td>
+                    <td class="date">%s</td>
+                    <td class="topic">%s</td>
+                    <td class="query">%s</td>
+                    <td class="source">%s</td>
+                    <td class="header">%s</td>
+                    <td class="content">%s</td>
                 </tr>
-                """ % (article.date.strftime("%Y-%m-%d"), article.topic, article.query, article.get_html_link(bt=True))
+                """ % (article.date.strftime("%Y-%m-%d"), article.topic, article.query,
+                        article.source, article.get_html_link(bt=True), article.content)
 
-        html += "</table>\n" 
+        html += "</table>\n</html>" 
         open(filename, 'w').write(html)
 
 

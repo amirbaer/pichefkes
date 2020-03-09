@@ -11,6 +11,9 @@ class Article:
         self.link = newsapi_article["url"]
         self.date = datetime.strptime(newsapi_article["publishedAt"], "%Y-%m-%dT%H:%M:%SZ") 
         self.description = newsapi_article["description"]
+        self.content = newsapi_article["content"]
+        self.source = newsapi_article["source"]["name"]
+
 
 
     def get_html_link(self, bt=False):
