@@ -128,23 +128,23 @@ def main(out_filename, run_params):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: %s <output filename> [<time back days>] [<page size>] [<limit per topic>] [<topic_filter>]" % sys.argv[0])
+        print("usage: %s <output filename> [<topic_filter>] [<time back days>] [<page size>] [<limit per topic>]" % sys.argv[0])
         sys.exit(1)
 
-    tbd = TIME_BACK_DAYS
+    topic_filter = None
     if len(sys.argv) > 2:
-        tbd = int(sys.argv[2])
+        topic_filter = sys.argv[2]
+
+    tbd = TIME_BACK_DAYS
+    if len(sys.argv) > 3:
+        tbd = int(sys.argv[3])
 
     ps = PAGE_SIZE
-    if len(sys.argv) > 3:
-        ps = int(sys.argv[3])
+    if len(sys.argv) > 4:
+        ps = int(sys.argv[4])
 
     lpt = LIMIT_PER_TOPIC
-    if len(sys.argv) > 4:
-        lpt = sys.argv[4]
-
-    topic_filter = None
     if len(sys.argv) > 5:
-        topic_filter = sys.argv[5]
+        lpt = int(sys.argv[5])
 
     main(sys.argv[1], RunParams(tbd, ps, lpt, topic_filter))
