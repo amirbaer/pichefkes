@@ -14,11 +14,12 @@ from news_item import Article
 
 #### PARAMS #####
 
-PAGE_SIZE = 100
-TIME_BACK_DAYS = 30
+PAGE_SIZE = 30
+TIME_BACK_DAYS = 4
 LIMIT_PER_TOPIC = 30
 QINTITLE = True
 NEWSAPI_KEY = '96c080920fcb45d0ac17ad985534aeba'
+NEWSAPI_KEY = '5193aa90a389489ab7e77f6edb657e5f'
 
 #################
 

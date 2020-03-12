@@ -17,8 +17,9 @@ topic_queries = {
         
             # EOS
         "eos": (
-            "eos -canon -eos.org -price -analysis",
+            "eos -canon -eos.org -price -analysis -mirrorless -imaging -canons -photos -moisturizing -resort -dslr -dslrs",
             "eosio crypto",
+            "eos network",
             "eos block.one",
             "'eos foundation' -eos.org",
         ),
@@ -53,6 +54,7 @@ topic_queries = {
             "stellar",
             "stellar lumen",
             "stellar crypto",
+            "stellar development foundation sdf",
         ),
 
             # BSV
@@ -112,5 +114,11 @@ topic_queries = {
 
             "anchorage crypto",
             "anchorage crypto partners",
+        ),
+
+        "curv": (
+            "curv",
+            "curv crypto",
+            "curv wallet",
         ),
 }
