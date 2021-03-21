@@ -44,8 +44,6 @@ Algorithm:
     - if there are too many, some get left out
 """
 
-IMG_EXTS = ["PNG", "JPG", "JPEG"]
-IMG_EXTS.extend([ie.lower() for ie in IMG_EXTS])
 
 CANVAS_SIZES = {
     "instagram-square":     (1080, 1080),
@@ -201,13 +199,9 @@ def print_table_of_dimension_options_highlight_best(n, ratio, pad=1):
     print_table_of_dimension_options(n, ratio, pad, minimum)
 
 
-def get_image_files_by_folder(folder):
-    if not os.path.isdir(folder):
-        print("not a folder")
-        sys.exit(1)
 
-    files = glob.glob(os.path.join(glob.escape(folder), "*"))
-    return sorted(filter(lambda f: os.path.splitext(f)[1][1:] in IMG_EXTS, files))
+
+from common import get_image_files_by_folder
 
 
 def main():
@@ -239,30 +233,6 @@ def main():
 
 
 
-def crop_all_square():
-    if not len(sys.argv) == 2:
-        print("usage: %s <folder>" % sys.argv[0])
-        sys.exit(1)
-
-    folder = sys.argv[1]
-    image_files = get_image_files_by_folder(folder)
-
-    new_folder = os.path.join(folder, "cropped")
-    if image_files:
-        os.mkdir(new_folder)
-
-    for ifi in image_files:
-        orig_image = Image.open(ifi)
-
-        w, h = orig_image.size
-        nw = nh = min(w, h)
-
-        new_image = Image.new('RGB', (nw, nh))
-        new_image.paste(orig_image, (0, 0))
-
-        new_image.save(os.path.join(new_folder, os.path.basename(ifi)), "PNG")
-        print(".", sep="", end="", flush=True)
-
 
 
 
@@ -289,5 +259,3 @@ def cmd_main():
     create_collage(canvas_size, pics, cols, rows, output)
 
 
-if __name__ == "__main__":
-    crop_all_square()
