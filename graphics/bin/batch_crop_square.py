@@ -3,7 +3,7 @@
 import os
 import sys
 
-from PIL import Image, ImageEnhance
+from PIL import Image
 
 # trick for making local package imports work
 sys.path.append(os.path.abspath(os.path.curdir))
