@@ -116,7 +116,7 @@ def collage_assemble():
     for r in range(rows):
         for c in range(cols):
             cell = pop_collage.get_image(c, r)
-            cell = cell.resize((cw, ch)) # not scaled
+            cell = cell.resize((cw, ch)) #TODO: not scaled
             out_image.paste(cell, (c * cw, r * ch))
             print(".", sep="", end="", flush=True)
 
