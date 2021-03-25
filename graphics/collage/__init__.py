@@ -103,7 +103,7 @@ def get_wh_by_nr(n, ratio=1):
 
     return w, h
 
-def get_dimensions_by_num_items(n, ratio):
+def get_dimensions_by_num_items(n, ratio=1):
     "determine width & height from num of cells & desired h/w ratio"
     w, h = cols, rows = get_wh_by_nr(n, ratio)
 
