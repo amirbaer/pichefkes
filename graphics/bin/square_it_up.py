@@ -37,13 +37,6 @@ def babushka_squares(output, n):
     plt.axis("off")
     plt.savefig(output)
 
-def square_mosaic(output, n):
-    data = random.random((n,n))
-    img = plt.imshow(data, interpolation='nearest')
-    img.set_cmap('hot')
-    plt.axis('off')
-    plt.savefig(output, bbox_inches='tight')
-
 
 def square_it_up():
     if not len(sys.argv) == 3:
@@ -52,8 +45,7 @@ def square_it_up():
 
     output = sys.argv[1]
     n = int(sys.argv[2])
-    square_mosaic(output, n)
-    #babushka_squares(output, n)
+    babushka_squares(output, n)
 
 if __name__ == "__main__":
     square_it_up()
