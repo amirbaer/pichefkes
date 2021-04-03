@@ -24,7 +24,7 @@ def get_parser():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument("output", help="output file (PNG)", type=str)
-    parser.add_argument("--cmap", "-c", help="set color map", type=str, choices=plt.cm._cmap_registry.keys())
+    parser.add_argument("--cmap", "-c", help="set color map", type=str, choices=plt.cm._cmap_registry.keys(), default="viridis")
     parser.add_argument("--dpi", "-d", help="set dots (pixels) per inch", type=int, default=100)
     parser.add_argument("--size", "-s", help="set size in inches", type=size_str, default="30x30")
     parser.add_argument("--interpolation", "-i", help="set interpolation method", type=str, default='nearest', choices=('none', 'antialiased', 'nearest', 'bilinear',
