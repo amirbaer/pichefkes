@@ -71,6 +71,8 @@ def get_data_comprehensive_random(n, *args, **kwargs):
     random.shuffle(data)
     return np.array(data).reshape((n,n))
 
+def get_data_random(n, *args, **kwargs):
+    return np.random.random((n,n))
 
 DATA_MODES = {
     "linear":                   get_data_linear,
@@ -81,6 +83,7 @@ DATA_MODES = {
     "sin3":                     get_data_sin_3,
     "sin4":                     get_data_sin_4,
     "square-spiral":            get_data_square_spiral,
+    "random":                   get_data_random,
     "comprehensive-random":     get_data_comprehensive_random,
 }
 
