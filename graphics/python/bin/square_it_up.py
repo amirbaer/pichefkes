@@ -4,7 +4,6 @@ import random
 import os
 import sys
 
-
 import matplotlib.pyplot as plt
 from numpy import random
 from shapely.geometry import box
@@ -37,7 +36,6 @@ def babushka_squares(output, n):
     plt.axis("off")
     plt.savefig(output)
 
-
 def square_it_up():
     if not len(sys.argv) == 3:
         print("usage: %s <output> <n>" % sys.argv[0])
@@ -49,3 +47,4 @@ def square_it_up():
 
 if __name__ == "__main__":
     square_it_up()
+
