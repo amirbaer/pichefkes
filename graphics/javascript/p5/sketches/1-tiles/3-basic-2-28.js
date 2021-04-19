@@ -3,38 +3,9 @@ let version = "0";
 
 let v1 = 1;
 
-// CCapture instructions: https://medium.com/@ffmaer/record-p5-js-with-ccapture-js-8e3ac9488ac3
-
-let capturer;
-let btn;
-
-function record() {
-	capturer = new CCapture({
-		format: "png",
-		framerate: 24
-	});
-	capturer.start();
-	btn.textContent = "stop recording";
-	btn.onclick = e => {
-		capturer.stop();
-		capturer.save();
-		capturer = null;
-		btn.textContent = "start recording";
-		btn.onclick = record;
-	};
-}
-
 function setup() {
 	createCanvas(400, 400);
 	colorMode(HSB);
-
-	// ccapture
-	frameRate(24)
-	btn = document.createElement("button");
-	btn.textContent = "start recording";
-	document.body.appendChild(btn);
-	btn.onclick = record;
-	//btn.click(); //start recording automatically
 }
 
 function draw() {
@@ -50,11 +21,6 @@ function draw() {
 		noLoop();
 	} else {
 		//save(`${name}-${version}-${v1}.png`);
-	}
-
-	// ccapture
-	if (capturer) {
-		capturer.capture(document.getElementById("defaultCanvas0"));
 	}
 }
 
