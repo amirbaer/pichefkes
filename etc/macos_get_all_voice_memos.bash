@@ -2,6 +2,7 @@
 
 if [ $# != 1 ]; then
     echo "usage: $0 <output folder>"
+    echo "this script copies all of your iphone voice memos into a folder naming them by date & title"
     exit 1
 fi
 
