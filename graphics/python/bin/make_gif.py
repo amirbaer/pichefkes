@@ -1,18 +1,20 @@
 #!/usr/local/bin/python3
 
 import glob
+import os
 import sys
 
 import imageio
 import natsort
 
 
-def main(folder, output, duration=0.1, reverse=True):
+def main(folder, output, duration=0.1, reverse=False):
     with imageio.get_writer(output, mode='I', duration=duration) as writer:
         for filename in natsort.natsorted(glob.glob("%s/*" % folder), reverse=reverse):
-            image = imageio.imread(filename)
-            writer.append_data(image)
-            print(".", sep="", end="", flush=True)
+            if os.path.isfile(filename):
+                image = imageio.imread(filename)
+                writer.append_data(image)
+                print(".", sep="", end="", flush=True)
 
     print("\ndone")
 
