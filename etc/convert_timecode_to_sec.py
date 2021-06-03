@@ -5,7 +5,7 @@ import sys
 
 def main():
     if not len(sys.argv) == 2:
-        print("usage: %s <timecode>" % sys.arg[0])
+        print("usage: %s <timecode>" % sys.argv[0])
         print("timecode format: %H:%M:%S or %M:%S")
         sys.exit(1)
 
