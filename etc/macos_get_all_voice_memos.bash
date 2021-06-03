@@ -1,8 +1,9 @@
 #!/bin/bash
 
-if [ $# != 1 ]; then
-    echo "usage: $0 <output folder>"
-    echo "this script copies all of your iphone voice memos into a folder naming them by date & title"
+if [[ $# == 0 ]] || [[ $# > 2 ]]; then
+    echo "usage: $0 <output folder> [<tail>]"
+    echo "this script copies all(*) of your iphone voice memos into a folder naming them by date & title"
+    echo "(*) or only last <tail> (#) of memos"
     exit 1
 fi
 
@@ -12,6 +13,10 @@ tmp_file="/tmp/voice-memos-$RANDOM"
 sep=";"
 
 sqlite3 -separator "$sep" "$HOME/Library/Application Support/com.apple.voicememos/Recordings/CloudRecordings.db" "select ZPATH, ZCUSTOMLABEL from ZCLOUDRECORDING order by ZPATH;" > "$tmp_file"
+
+if [[ $# == 2 ]]; then
+    echo "$(tail -$2 $tmp_file)" > $tmp_file
+fi
 
 IFS=$'\n'
 for line in `cat "$tmp_file"`; do
