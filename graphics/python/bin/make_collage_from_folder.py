@@ -6,7 +6,7 @@ import os
 import sys
 
 # trick for making local package imports work
-sys.path.append(os.path.abspath(os.path.curdir))
+sys.path.append(os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), ".."))
 
 from common import get_image_files_by_folder
 
