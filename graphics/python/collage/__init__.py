@@ -45,7 +45,6 @@ def create_collage(paths, canvas_width, canvas_height, cols, rows, output):
     new_image = Image.new('RGB', DEFAULT_CANVAS_SIZE)
     cursor = (0,0)
     for path in paths:
-        print(path)
         # place image
         image = Image.open(path)
         image = image.resize((cell_width, cell_height))
