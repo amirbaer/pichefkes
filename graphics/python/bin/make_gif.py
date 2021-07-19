@@ -6,6 +6,8 @@ import sys
 
 import imageio
 import natsort
+import numpy
+from PIL import Image
 
 
 def main(folder, output, duration=0.1, reverse=False):
@@ -13,6 +15,7 @@ def main(folder, output, duration=0.1, reverse=False):
         for filename in natsort.natsorted(glob.glob("%s/*" % folder), reverse=reverse):
             if os.path.isfile(filename):
                 image = imageio.imread(filename)
+                image = numpy.array(Image.fromarray(image).resize((500,500)))
                 writer.append_data(image)
                 print(".", sep="", end="", flush=True)
 

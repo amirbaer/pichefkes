@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+import re
 
 
 IMG_EXTS = ["PNG", "JPG", "JPEG"]
