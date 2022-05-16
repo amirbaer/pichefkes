@@ -48,23 +48,28 @@ class PopulationCollage:
         self._empty_cell_image = Image.open(self.empty_cell_image)
 
     def _build_map(self):
-        self._map = ["empty"] * self.num_empty_cells
+        self._map = []
         if self.mode == "random":
+            self._map = ["empty"] * self.num_empty_cells
+            indices = list(range(len(self._image_pool)))
             for i in range(self.ncells - self.num_empty_cells):
-                self._map.append(random.randrange(len(self._image_pool)))
+                self._map.append(indices.pop(random.randrange(len(indices))))
             random.shuffle(self._map)
 
         elif self.mode == "start-empty":
+            self._map = ["empty"] * self.num_empty_cells
             for i in range(self.ncells - self.num_empty_cells):
-                self._map.append(random.randrange(len(self._image_pool)))
+                self._map.append(i)
 
         elif self.mode == "end-empty":
             for i in range(self.ncells - self.num_empty_cells):
-                self._map.insert(0, random.randrange(len(self._image_pool)))
+                self._map.append(i)
+            self._map += ["empty"] * self.num_empty_cells
 
         elif self.mode == "grouped":
+            self._map = ["empty"] * self.num_empty_cells
             for i in range(self.ncells - self.num_empty_cells):
-                self._map.append(random.randrange(len(self._image_pool)))
+                self._map.append(i)
             self._map.sort(key=str)
 
         
