@@ -1,5 +1,6 @@
 #!/usr/local/bin/python3
 
+import argparse
 import random
 import os
 import sys
@@ -15,13 +16,17 @@ OUTPUT_SIZE = (3000, 3000)
 MODES = ("random", "start-empty", "end-empty", "grouped")
 
 class PopulationCollage:
-    def __init__(self, cell_images, empty_cell_image, cols, rows, num_empty_cells=0, mode="random"):
+    def __init__(self, cell_images, cols, rows, num_empty_cells=0, empty_cell_image=None, bg_color="white", mode="random"):
         self.cell_images = cell_images
-        self.empty_cell_image = empty_cell_image
+
         self.cols = cols
         self.rows = rows
         self.ncells = self.cols * self.rows
+
+        self.empty_cell_image = empty_cell_image
         self.num_empty_cells = num_empty_cells
+        self.bg_color = bg_color
+
         self.mode = mode
 
         self.build_collage()
@@ -45,7 +50,10 @@ class PopulationCollage:
         self._image_pool = []
         for ci in self.cell_images:
             self._image_pool.append(Image.open(ci))
-        self._empty_cell_image = Image.open(self.empty_cell_image)
+        if self.empty_cell_image:
+            self._empty_cell_image = Image.open(self.empty_cell_image)
+        else:
+            self._empty_cell_image = Image.new('RGB', self._image_pool[0].size, self.bg_color)
 
     def _build_map(self):
         self._map = []
@@ -75,42 +83,8 @@ class PopulationCollage:
         
 
 
-def collage_assemble():
-    if not len(sys.argv) in (5, 6, 7):
-        print("usage: %s <output> <cell folder> <cols> <rows> [<num empty cells>] [<mode>]" % sys.argv[0])
-        print("this script creates a (%dx%dpx) collage in the specified dimensions (cols x rows)" % OUTPUT_SIZE)
-        print("it fills the collage with images from the cell folder")
-        print("- num cells = cols X rows")
-        print("- each cell will contain an image (except for empty cells)")
-        print("- all images are resized to the size of a cell")
-        print("- assuming last image in cell folder is an empty cell")
-        sys.exit(1)
-
-    output = sys.argv[1]
-    
-    cell_folder = sys.argv[2]
-    if not os.path.isdir(cell_folder):
-        print("not a folder: %s" % cell_folder)
-        sys.exit(1)
-
-    cell_images = get_image_files_by_folder(cell_folder)
-    empty_cell_image = cell_images.pop()
-
-    cols = int(sys.argv[3])
-    rows = int(sys.argv[4])
-
-    num_empty_cells = 0
-    if len(sys.argv) >= 6:
-        num_empty_cells = int(sys.argv[5])
-
-    mode = "random"
-    if len(sys.argv) == 7:
-        mode = sys.argv[6]
-        if not mode in MODES:
-            print("bad mode: %s" % mode)
-            sys.exit(1)
-
-    pop_collage = PopulationCollage(cell_images, empty_cell_image, cols, rows, num_empty_cells, mode)
+def collage_assemble(output, image_files, cols, rows, num_empty_cells, empty_cell_image, bg_color, mode):
+    pop_collage = PopulationCollage(image_files, cols, rows, num_empty_cells, empty_cell_image, bg_color, mode)
 
     out_image = Image.new('RGB', OUTPUT_SIZE)
 
@@ -129,5 +103,26 @@ def collage_assemble():
     print()
 
 if __name__ == "__main__":
-    collage_assemble()
+    parser = argparse.ArgumentParser(sys.argv[0], description="create a (%dx%dpx) collage (photo grid) in the specified dimensions (cols x rows)" % OUTPUT_SIZE)
+
+    parser.add_argument("-i", "--image", dest="images", nargs="+", required=False, help="input file")
+    parser.add_argument("-I", "--image-folder", dest="image_folder", required=False, help="input folder")
+    parser.add_argument("-o", "--output", required=True, help="output file")
+    parser.add_argument("-ei", "--empty-image", dest="empty_image", required=False, help="empty cell image")
+
+    parser.add_argument("-c", "--cols", type=int, required=True, help="number of columns in the photo grid")
+    parser.add_argument("-r", "--rows", type=int, required=True, help="number of rows in the photo grid")
+    parser.add_argument("-ne", "--num-empty", dest="num_empty_cells", type=int, required=False, default=0, help="how many empty slots to leave in the photo grid")
+    parser.add_argument("-bg", "--background", type=str, required=False, default="white", help="color of background (empty cells)")
+    parser.add_argument("-m", "--mode", type=str, required=False, choices=MODES, default="random", help="mode of arranging the photos in the grid")
+
+    args = parser.parse_args()
+
+    image_files = []
+    if args.image_folder:
+        image_files += get_image_files_by_folder(args.image_folder)
+    if args.images:
+        image_files.append(args.images)
+
+    collage_assemble(args.output, image_files, args.cols, args.rows, args.num_empty_cells, args.empty_image, args.background, args.mode)
 
