@@ -18,7 +18,9 @@ def crop_all_square(output_folder, image_files, frame_size=0, background_color="
         fz = frame_size
         w, h = orig_image.size
         nw = nh = min(w, h)
-        cropped_image = orig_image.crop((fz, fz, nw - fz, nh - fz))
+        #cropped_image = orig_image.crop((fz, fz, nw - fz, nh - fz)) # crop from all sides
+        cropped_image = orig_image.crop((0, 0, nw - (2 * fz), nh - (2 * fz))) # crop from bottom right
+        #cropped_image = orig_image.resize((nw - (2 * fz), nh - (2 * fz)))
 
         new_image = Image.new('RGB', (nw, nh), color=background_color)
         new_image.paste(cropped_image, (fz, fz, nw - fz, nh - fz))
@@ -39,7 +41,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if not args.image and not args.image_folder:
+    if not args.images and not args.image_folder:
         print("error: no input files specified")
         sys.exit(1)
 

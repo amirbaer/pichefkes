@@ -122,7 +122,7 @@ if __name__ == "__main__":
     if args.image_folder:
         image_files += get_image_files_by_folder(args.image_folder)
     if args.images:
-        image_files.append(args.images)
+        image_files += args.images
 
     collage_assemble(args.output, image_files, args.cols, args.rows, args.num_empty_cells, args.empty_image, args.background, args.mode)
 
