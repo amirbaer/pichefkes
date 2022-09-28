@@ -3,6 +3,10 @@
 import os
 import sys
 
+"""
+This script creates a mosaic, which is a grid of different colors/shades
+"""
+
 # trick for making local package imports work
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), ".."))
 

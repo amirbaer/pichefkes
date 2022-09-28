@@ -1,13 +1,16 @@
 #!/usr/local/bin/python3
 
-import argparse
-import re
 import os
 import sys
 
-
 import matplotlib.pyplot as plt
 import numpy as np
+
+"""
+This script creates a mosaic, which is a grid of different colors/shades
+It uses a file as an input buffer (using its binary data to affect the form of the mosaic)
+"""
+
 
 # INFO: Color Maps: https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html
 

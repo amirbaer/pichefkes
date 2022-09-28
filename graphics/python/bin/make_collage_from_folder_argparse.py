@@ -1,10 +1,9 @@
 #!/usr/local/bin/python3
 
 import argparse
-import glob
 import math
 import os
-import re
+import random
 import sys
 
 # trick for making local package imports work
@@ -33,12 +32,10 @@ def get_parser_args():
 
     parser.add_argument("--tile-size", "-ts", help="set size for each individual tile (<width>x<height>", type=parse_size_str)
 
-    parser.add_argument("--randomize-order", "-ro", help="shuffle the input files", action="store_true")
-    parser.add_argument("--colorize", "-c", help="add a hue to each input image", action="store_true")
+    parser.add_argument("--randomize-order", "-ro", help="shuffle the input files", action="store_true", dest="random")
 
     args = parser.parse_args()
     return args
-
 
 
 def main():
@@ -53,6 +50,10 @@ def main():
     pics = args.inputs
     count = len(pics)
     print("%d pics found" % count)
+
+    if args.random:
+        print("randomizing order")
+        random.shuffle(pics)
 
     sqrt = math.sqrt(count)
     cols = math.ceil(sqrt)
