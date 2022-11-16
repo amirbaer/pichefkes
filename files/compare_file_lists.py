@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import random
 import sys
 
 from dataclasses import dataclass
@@ -181,8 +182,9 @@ def main(source_fn, dest_fn):
                 if sf.size > df.size:
                     action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
 
-    print("\naction commands:")
-    print("\n".join(action_commands))
+    ac_fn = f"/tmp/action-commands-{random.randrange(10000).sh}"
+    print("\naction commands:", ac_fn)
+    open(ac_fn, 'w').write("\n".join(action_commands))
 
 #------------
 
