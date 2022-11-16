@@ -82,14 +82,14 @@ class FileIndex:
         if isinstance(file_or_path, File):
             path = file_or_path.full_path
 
-        return self.path_to_files(path)
+        return self.path_to_files[path]
 
     def by_parent_folder(self, file_or_parent_folder: Union[File, str]) -> List[File]:
         parent_folder = file_or_parent_folder
         if isinstance(file_or_parent_folder, File):
             parent_folder = file_or_parent_folder.parent_folder
 
-        file_paths = self.parent_folder_to_file_paths(parent_folder)
+        file_paths = self.parent_folder_to_file_paths[parent_folder]
         return [self.by_path(path) for path in file_paths]
 
     def get_parent_folders(self):
@@ -134,9 +134,10 @@ def main(source_fn, dest_fn):
         dfsn = set([f.filename for f in dest_files])
         s_d_fsn = sfsn - dfsn
         d_s_fsn = dfsn - sfsn
-        print(f"comparison by name | missing in source: {len(d_s_fsn)} | missing in dest: {len(s_d_fsn)}")
-        print(f" -> missing in source:\n{'\n'.join(d_s_fsn)}")
-        print(f" -> missing in dest:\n{'\n'.join(s_d_fsn)}")
+        if s_d_fsn or d_s_fsn:
+            print(f"comparison by name | missing in source: {len(d_s_fsn)} | missing in dest: {len(s_d_fsn)}")
+            print(" -> missing in source:\n%s" % '\n'.join(d_s_fsn))
+            print(" -> missing in dest:\n%s" % '\n'.join(s_d_fsn))
 
         sfs = set(source_files)
         dfs = set(dest_files)
@@ -145,17 +146,19 @@ def main(source_fn, dest_fn):
         print(f"comparison by size & UUID | missing in source: {len(d_s_fs)} | missing in dest: {len(s_d_fs)}")
         s_d_fs_fns = set([f.filename for f in s_d_fs])
         d_s_fs_fns = set([f.filename for f in d_s_fs])
-        same_fn_different_meta = s_d_fs_fn.intersection(d_s_fs_fns)
+        same_fn_different_meta = s_d_fs_fns.intersection(d_s_fs_fns)
         print(" -> same filename, different metadata:")
         for fn in same_fn_different_meta:
-            sf = filter(lambda f: f.filename == fn, source_files)[0]
-            df = filter(lambda f: f.filename == fn, dest_files)[0]
+            sf = [f for f in source_files if f.filename == fn][0]
+            df = [f for f in dest_files if f.filename == fn][0]
             print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
 
         source_only_fs = s_d_fs_fns - d_s_fs_fns - same_fn_different_meta
         dest_only_fs = d_s_fs_fns - s_d_fs_fns - same_fn_different_meta
-        print(f" -> missing in source:\n{'\n'.join(source_only_fs)}")
-        print(f" -> missing in dest:\n{'\n'.join(dest_only_fs)}")
+        if source_only_fs:
+            print(f" -> missing in source:\n%s" % '\n'.join(source_only_fs))
+        if dest_only_fs:
+            print(f" -> missing in dest:\n%s" % '\n'.join(dest_only_fs))
 
 
 #------------
