@@ -4,15 +4,15 @@
 # I think I might change the interface and logic to run on one dir at a time
 
 if [[ $# < 2 ]]; then
-	echo "usage: $0 <source dir> <dest dir> [<extension=HEIC>]"
+	echo "usage: $0 <dir> <output file> [<extension=HEIC>]"
 	echo
-	echo "the script reads all the files with a certain extension in two folders,"
-	echo "checks each file's size and writes the output to a '|'-separated file in the work dir folder"
+	echo "the script reads all the files with a certain extension in a folder,"
+	echo "checks each file's size and writes the output to a '|'-separated file"
 	exit 1
 fi
 
-source_dir="$1"
-dest_dir="$2"
+dir="$1"
+output_file="$2"
 extension="${3-HEIC}"
 
 work_dir="/tmp/cf-$RANDOM"
@@ -23,8 +23,6 @@ IFS=$'\n'
 
 s1="$work_dir/01_source_$extension.txt"
 s2="$work_dir/02_source_sorted_sized_$extension.txt"
-d1=`echo $s1 | sed 's/source/dest/g'`
-d2=`echo $s2 | sed 's/source/dest/g'`
 
 process_dir () {
 	id="$1"
@@ -51,8 +49,8 @@ process_dir () {
 	echo "done"
 }
 
-process_dir "$source_dir" "$s1" "$s2" "source"
-process_dir "$dest_dir" "$d1" "$d2" "dest"
+process_dir "$dir" "$s1" "$s2" "source"
+cp "$s2" "$output_file"
 
 # Now we need to figure out how to compare these two lists
 
