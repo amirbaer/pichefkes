@@ -33,7 +33,14 @@ class File:
     uuid: str
 
     def __eq__(self, other) -> bool:
-        return self.size == other.size and self.uuid == other.uuid
+        return self.__key() == other.__key()
+
+    def __key(self):
+        return (self.filename, self.size, self.uuid)
+
+    def __hash__(self):
+        return hash(self.__key())
+
 
 class FileIndex:
     def __init__(self, list_fn: str, sep="|"):
@@ -88,6 +95,7 @@ class FileIndex:
     def get_parent_folders(self):
         return set(self.parent_folder_to_file_paths.keys())
 
+
 #------------
 
 
@@ -114,6 +122,36 @@ def main(source_fn, dest_fn):
         print(f"source folders not in dest: {', '.join(s_d_pfs)}")
     if d_s_pfs:
         print(f"dest folders not in source: {', '.join(d_s_pfs)}")
+
+    shared_pfs = source_pfs.intersection(dest_pfs)
+    print(f"analyzing {len(shared_pfs)} shared folders...")
+    for pf in sorted(shared_pfs):
+        source_files = source.by_parent_folder(pf)
+        dest_files = dest.by_parent_folder(pf)
+        print(f"[ {pf} | source: {len(source_files)} files | dest: {len(dest_files)}) files ]")
+
+        sfsn = set(source_files)
+        dfsn = set(dest_files)
+        s_d_fsn = sfsn - dfsn
+        d_s_fsn = dfsn - sfsn
+        print(f"comparison by name | missing in source: {len(d_s_fsn)} | missing in dest: {len(s_d_fsn)}")
+        print(f" -> missing in source:")
+        print(f" -> missing in dest:")
+
+
+        print(f"comparison by size & UUID: ")
+        sfs = set(source_files)
+        dfs = set(dest_files)
+        s_d_fs = sfs - dfs
+        d_s_fs = dfs - sfs
+
+        if s_d_fs:
+            print(f"source files not in dest: {', '.join(s_d_fs)}")
+        if d_s_fs:
+            print(f"dest files not in source: {', '.join(d_s_fs)}")
+
+
+
 
 #------------
 
