@@ -2,6 +2,9 @@
 
 if [[ $# < 2 ]]; then
 	echo "usage: $0 <source dir> <dest dir> [<extension=HEIC>]"
+	echo
+	echo "the script reads all the files with a certain extension in two folders,"
+	echo "checks each file's size and writes the output to a '|'-separated file in the work dir folder"
 	exit 1
 fi
 
