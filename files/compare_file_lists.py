@@ -53,7 +53,7 @@ class FileIndex:
         file_list = []
         for line in open(list_fn).readlines():
             parent_folder, filename, size, uuid, full_path = line.split(sep)
-            file_list.append(File(filename, parent_folder, full_path, size, uuid))
+            file_list.append(File(filename, parent_folder, full_path.strip(), size, uuid))
         return file_list
 
     def _index(self, file_list: List[File]):
@@ -123,6 +123,8 @@ def main(source_fn, dest_fn):
     if d_s_pfs:
         print(f"dest folders not in source: {', '.join(d_s_pfs)}")
 
+    action_commands = []
+
     shared_pfs = source_pfs.intersection(dest_pfs)
     print(f"analyzing {len(shared_pfs)} shared folders...")
     for pf in sorted(shared_pfs):
@@ -153,13 +155,29 @@ def main(source_fn, dest_fn):
             df = [f for f in dest_files if f.filename == fn][0]
             print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
 
-        source_only_fs = s_d_fs_fns - d_s_fs_fns - same_fn_different_meta
-        dest_only_fs = d_s_fs_fns - s_d_fs_fns - same_fn_different_meta
-        if source_only_fs:
-            print(f" -> missing in source:\n%s" % '\n'.join(source_only_fs))
-        if dest_only_fs:
-            print(f" -> missing in dest:\n%s" % '\n'.join(dest_only_fs))
+            # save action command - take the bigger one
+            bigger, smaller = sf.size > df.size and (sf, df) or (df, sf)
+            action_commands.append(f'cp "{bigger.full_path}" "{smaller.full_path}"')
 
+        source_only_fs_fn = s_d_fs_fns - d_s_fs_fns - same_fn_different_meta
+        dest_only_fs_fn = d_s_fs_fns - s_d_fs_fns - same_fn_different_meta
+        if source_only_fs_fn:
+            print(f" -> missing in source:\n%s" % '\n'.join(source_only_fs_fn))
+            for fn in source_only_fs_fn:
+                sf = [f for f in source_files if f.filename == fn][0]
+                df = [f for f in dest_files if f.filename == fn][0]
+                bigger, smaller = sf.size > df.size and (sf, df) or (df, sf)
+                action_commands.append(f'cp "{bigger.full_path}" "{smaller.full_path}"')
+        if dest_only_fs_fn:
+            print(f" -> missing in dest:\n%s" % '\n'.join(dest_only_fs_fn))
+            for fn in dest_only_fs_fn:
+                sf = [f for f in source_files if f.filename == fn][0]
+                df = [f for f in dest_files if f.filename == fn][0]
+                bigger, smaller = sf.size > df.size and (sf, df) or (df, sf)
+                action_commands.append(f'cp "{bigger.full_path}" "{smaller.full_path}"')
+
+    print("\naction commands:")
+    print("\n".join(action_commands))
 
 #------------
 
