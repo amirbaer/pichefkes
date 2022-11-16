@@ -34,12 +34,13 @@ process_dir () {
 	find "$id" -type f -iname "*.$extension" -exec realpath {} ';' > "$of1"
 	echo "found `wc -l $of1 | awk '{print $1}'` files"
 
-	echo "checking file sizes..."
+	echo "gathering file metadata..."
 	for f in `cat $of1`; do
 		b=$(basename "$f")
 		pd=$(basename $(dirname "$f"))
 		fs=$(du -k "$f" | awk '{print $1}')
-		echo "$pd|$b|$fs|$f" >> "$of2"
+		fco=$(exiftool "$f" | grep 'Content Identifier' | awk '{print $4}') #cut -d ':' -f 2 | tr -d ' ')
+		echo "$pd|$b|$fs|$fco|$f" >> "$of2" # NOTE: this directly affects the parsing the complementary python script
 		echo -n "."
 	done
 
