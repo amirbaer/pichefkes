@@ -130,27 +130,32 @@ def main(source_fn, dest_fn):
         dest_files = dest.by_parent_folder(pf)
         print(f"[ {pf} | source: {len(source_files)} files | dest: {len(dest_files)}) files ]")
 
-        sfsn = set(source_files)
-        dfsn = set(dest_files)
+        sfsn = set([f.filename for f in source_files])
+        dfsn = set([f.filename for f in dest_files])
         s_d_fsn = sfsn - dfsn
         d_s_fsn = dfsn - sfsn
         print(f"comparison by name | missing in source: {len(d_s_fsn)} | missing in dest: {len(s_d_fsn)}")
-        print(f" -> missing in source:")
-        print(f" -> missing in dest:")
+        print(f" -> missing in source:\n{'\n'.join(d_s_fsn)}")
+        print(f" -> missing in dest:\n{'\n'.join(s_d_fsn)}")
 
-
-        print(f"comparison by size & UUID: ")
         sfs = set(source_files)
         dfs = set(dest_files)
         s_d_fs = sfs - dfs
         d_s_fs = dfs - sfs
+        print(f"comparison by size & UUID | missing in source: {len(d_s_fs)} | missing in dest: {len(s_d_fs)}")
+        s_d_fs_fns = set([f.filename for f in s_d_fs])
+        d_s_fs_fns = set([f.filename for f in d_s_fs])
+        same_fn_different_meta = s_d_fs_fn.intersection(d_s_fs_fns)
+        print(" -> same filename, different metadata:")
+        for fn in same_fn_different_meta:
+            sf = filter(lambda f: f.filename == fn, source_files)[0]
+            df = filter(lambda f: f.filename == fn, dest_files)[0]
+            print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
 
-        if s_d_fs:
-            print(f"source files not in dest: {', '.join(s_d_fs)}")
-        if d_s_fs:
-            print(f"dest files not in source: {', '.join(d_s_fs)}")
-
-
+        source_only_fs = s_d_fs_fns - d_s_fs_fns - same_fn_different_meta
+        dest_only_fs = d_s_fs_fns - s_d_fs_fns - same_fn_different_meta
+        print(f" -> missing in source:\n{'\n'.join(source_only_fs)}")
+        print(f" -> missing in dest:\n{'\n'.join(dest_only_fs)}")
 
 
 #------------
