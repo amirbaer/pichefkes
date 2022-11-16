@@ -1,5 +1,8 @@
 #!/bin/bash
 
+#TODO: since this script only creates the index list, there's not really a point in always running it on two directories at a time
+# I think I might change the interface and logic to run on one dir at a time
+
 if [[ $# < 2 ]]; then
 	echo "usage: $0 <source dir> <dest dir> [<extension=HEIC>]"
 	echo
@@ -29,7 +32,6 @@ process_dir () {
 	of2="$3"
 	category="$4"
 
-	# TODO: this only looks at HEIC files, we will need MOV videos and perhaps other file types as well
 	echo -n "reading $category dir [$id]... "
 	find "$id" -type f -iname "*.$extension" -exec realpath {} ';' > "$of1"
 	echo "found `wc -l $of1 | awk '{print $1}'` files"
