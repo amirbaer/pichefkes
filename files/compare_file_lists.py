@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import random
+import os
 import sys
 
 from dataclasses import dataclass
@@ -97,94 +98,89 @@ class FileIndex:
         return set(self.parent_folder_to_file_paths.keys())
 
 
+class FileIndexComparator:
+    def __init__(self, source_fn, dest_fn):
+        self.source = FileIndex(source_fn)
+        self.dest = FileIndex(dest_fn)
+
+    def compare_parent_folders(self):
+        source_pfs = self.source.get_parent_folders()
+        dest_pfs = self.dest.get_parent_folders()
+
+        self.action_commands = []
+
+        print(f"source parent folders: {len(source_pfs)}")
+        print(f"dest parent folders: {len(dest_pfs)}")
+
+        missing_pfs_dest = source_pfs - dest_pfs
+        missing_pfs_source = dest_pfs - source_pfs
+        if missing_pfs_dest:
+            print(f"missing in dest: {', '.join(missing_pfs_dest)}")
+        if missing_pfs_source:
+            print(f"missing in source: {', '.join(missing_pfs_source)}")
+
+        shared_pfs = source_pfs.intersection(dest_pfs)
+
+        print(f"analyzing {len(shared_pfs)} shared folders...")
+        for pf in sorted(shared_pfs):
+            source_files = self.source.by_parent_folder(pf)
+            dest_files = self.dest.by_parent_folder(pf)
+            print(f"[ {pf} | source: {len(source_files)} files | dest: {len(dest_files)}) files ]")
+
+            # Comparison by Name
+            sfsn = set([f.filename for f in source_files])
+            dfsn = set([f.filename for f in dest_files])
+            s_d_fsn = sfsn - dfsn
+            d_s_fsn = dfsn - sfsn
+            if s_d_fsn or d_s_fsn:
+                print(f"comparison by name | missing in source: {len(d_s_fsn)} | missing in dest: {len(s_d_fsn)}")
+                print(" -> missing in source:\n%s" % '\n'.join(d_s_fsn))
+                print(" -> missing in dest:\n%s" % '\n'.join(s_d_fsn))
+
+            # Comparison by Size & UUID
+            sfs = set(source_files)
+            dfs = set(dest_files)
+            s_d_fs = sfs - dfs
+            d_s_fs = dfs - sfs
+            print(f"comparison by size & UUID | missing in source: {len(d_s_fs)} | missing in dest: {len(s_d_fs)}")
+            s_d_fs_fns = set([f.filename for f in s_d_fs])
+            d_s_fs_fns = set([f.filename for f in d_s_fs])
+            same_fn_different_meta = s_d_fs_fns.intersection(d_s_fs_fns)
+            if same_fn_different_meta:
+                print(" -> same filename, different metadata:")
+                for fn in same_fn_different_meta:
+                    sf = self._file_by_fn(source_files, fn)
+                    df = self._file_by_fn(dest_files, fn)
+                    if sf.size > df.size:
+                        self.action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
+                    print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
+
+            source_only_fs_fn = s_d_fs_fns - d_s_fs_fns
+            dest_only_fs_fn = d_s_fs_fns - s_d_fs_fns
+            if dest_only_fs_fn:
+                print(f" -> missing in source:\n%s" % '\n'.join(dest_only_fs_fn))
+            if source_only_fs_fn:
+                print(f" -> missing in dest:\n%s" % '\n'.join(source_only_fs_fn))
+                for fn in source_only_fs_fn:
+                    sf = self._file_by_fn(source_files, fn)
+                    dpf = os.path.dirname(dest_files[0].full_path)
+                    self.action_commands.append(f'cp "{sf.full_path}" "{dpf}"')
+
+    def _file_by_fn(self, file_list, filename):
+        return [f for f in file_list if f.filename == filename][0]
+
+    def export_action_commands(self, output_fn):
+        open(output_fn, 'w').write("\n".join(self.action_commands))
+
 #------------
 
-def file_by_fn(file_list, filename):
-    return [f for f in file_list if f.filename == filename][0]
-
-
 def main(source_fn, dest_fn):
-    source = FileIndex(source_fn)
-    dest = FileIndex(dest_fn)
+    comparator = FileIndexComparator(source_fn, dest_fn)
+    comparator.compare_parent_folders()
 
-    # OK now we have the two lists nice & parsed, now comes the ugly part - we need to actually
-    # compare them
-
-    # Should I get some more info in the first step of importing the file metadata? (md5sum, exif date)
-    # Perhaps let's start with the existing data and then add
-
-    # OK let's start by comparing the parent folders
-    source_pfs = source.get_parent_folders()
-    dest_pfs = dest.get_parent_folders()
-
-    print(f"source parent folders: {len(source_pfs)}")
-    print(f"dest parent folders: {len(dest_pfs)}")
-
-    s_d_pfs = source_pfs - dest_pfs
-    d_s_pfs = dest_pfs - source_pfs
-    if s_d_pfs:
-        print(f"source folders not in dest: {', '.join(s_d_pfs)}")
-    if d_s_pfs:
-        print(f"dest folders not in source: {', '.join(d_s_pfs)}")
-
-    action_commands = []
-
-    shared_pfs = source_pfs.intersection(dest_pfs)
-    print(f"analyzing {len(shared_pfs)} shared folders...")
-    for pf in sorted(shared_pfs):
-        source_files = source.by_parent_folder(pf)
-        dest_files = dest.by_parent_folder(pf)
-        print(f"[ {pf} | source: {len(source_files)} files | dest: {len(dest_files)}) files ]")
-
-        # Comparison by Name
-        sfsn = set([f.filename for f in source_files])
-        dfsn = set([f.filename for f in dest_files])
-        s_d_fsn = sfsn - dfsn
-        d_s_fsn = dfsn - sfsn
-        if s_d_fsn or d_s_fsn:
-            print(f"comparison by name | missing in source: {len(d_s_fsn)} | missing in dest: {len(s_d_fsn)}")
-            print(" -> missing in source:\n%s" % '\n'.join(d_s_fsn))
-            print(" -> missing in dest:\n%s" % '\n'.join(s_d_fsn))
-
-        # Comparison by Size & UUID
-        sfs = set(source_files)
-        dfs = set(dest_files)
-        s_d_fs = sfs - dfs
-        d_s_fs = dfs - sfs
-        print(f"comparison by size & UUID | missing in source: {len(d_s_fs)} | missing in dest: {len(s_d_fs)}")
-        s_d_fs_fns = set([f.filename for f in s_d_fs])
-        d_s_fs_fns = set([f.filename for f in d_s_fs])
-        same_fn_different_meta = s_d_fs_fns.intersection(d_s_fs_fns)
-        print(" -> same filename, different metadata:")
-        for fn in same_fn_different_meta:
-            sf = file_by_fn(source_files, fn)
-            df = file_by_fn(dest_files, fn)
-            print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
-
-            # save action command - take the bigger one
-            if sf.size > df.size:
-                action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
-
-        source_only_fs_fn = s_d_fs_fns - d_s_fs_fns - same_fn_different_meta
-        dest_only_fs_fn = d_s_fs_fns - s_d_fs_fns - same_fn_different_meta
-        if source_only_fs_fn:
-            print(f" -> missing in source:\n%s" % '\n'.join(source_only_fs_fn))
-            for fn in source_only_fs_fn:
-                sf = file_by_fn(source_files, fn)
-                df = file_by_fn(dest_files, fn)
-                if sf.size > df.size:
-                    action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
-        if dest_only_fs_fn:
-            print(f" -> missing in dest:\n%s" % '\n'.join(dest_only_fs_fn))
-            for fn in dest_only_fs_fn:
-                sf = file_by_fn(source_files, fn)
-                df = file_by_fn(dest_files, fn)
-                if sf.size > df.size:
-                    action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
-
-    ac_fn = f"/tmp/action-commands-{random.randrange(10000).sh}"
-    print("\naction commands:", ac_fn)
-    open(ac_fn, 'w').write("\n".join(action_commands))
+    output_fn = f"/tmp/action-commands-{random.randrange(10000)}.sh"
+    comparator.export_action_commands(output_fn)
+    print("\naction commands:", output_fn)
 
 #------------
 
