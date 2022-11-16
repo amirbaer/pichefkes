@@ -98,6 +98,9 @@ class FileIndex:
 
 #------------
 
+def file_by_fn(file_list, filename):
+    return [f for f in file_list if f.filename == filename][0]
+
 
 def main(source_fn, dest_fn):
     source = FileIndex(source_fn)
@@ -132,6 +135,7 @@ def main(source_fn, dest_fn):
         dest_files = dest.by_parent_folder(pf)
         print(f"[ {pf} | source: {len(source_files)} files | dest: {len(dest_files)}) files ]")
 
+        # Comparison by Name
         sfsn = set([f.filename for f in source_files])
         dfsn = set([f.filename for f in dest_files])
         s_d_fsn = sfsn - dfsn
@@ -141,6 +145,7 @@ def main(source_fn, dest_fn):
             print(" -> missing in source:\n%s" % '\n'.join(d_s_fsn))
             print(" -> missing in dest:\n%s" % '\n'.join(s_d_fsn))
 
+        # Comparison by Size & UUID
         sfs = set(source_files)
         dfs = set(dest_files)
         s_d_fs = sfs - dfs
@@ -151,30 +156,30 @@ def main(source_fn, dest_fn):
         same_fn_different_meta = s_d_fs_fns.intersection(d_s_fs_fns)
         print(" -> same filename, different metadata:")
         for fn in same_fn_different_meta:
-            sf = [f for f in source_files if f.filename == fn][0]
-            df = [f for f in dest_files if f.filename == fn][0]
+            sf = file_by_fn(source_files, fn)
+            df = file_by_fn(dest_files, fn)
             print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
 
             # save action command - take the bigger one
-            bigger, smaller = sf.size > df.size and (sf, df) or (df, sf)
-            action_commands.append(f'cp "{bigger.full_path}" "{smaller.full_path}"')
+            if sf.size > df.size:
+                action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
 
         source_only_fs_fn = s_d_fs_fns - d_s_fs_fns - same_fn_different_meta
         dest_only_fs_fn = d_s_fs_fns - s_d_fs_fns - same_fn_different_meta
         if source_only_fs_fn:
             print(f" -> missing in source:\n%s" % '\n'.join(source_only_fs_fn))
             for fn in source_only_fs_fn:
-                sf = [f for f in source_files if f.filename == fn][0]
-                df = [f for f in dest_files if f.filename == fn][0]
-                bigger, smaller = sf.size > df.size and (sf, df) or (df, sf)
-                action_commands.append(f'cp "{bigger.full_path}" "{smaller.full_path}"')
+                sf = file_by_fn(source_files, fn)
+                df = file_by_fn(dest_files, fn)
+                if sf.size > df.size:
+                    action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
         if dest_only_fs_fn:
             print(f" -> missing in dest:\n%s" % '\n'.join(dest_only_fs_fn))
             for fn in dest_only_fs_fn:
-                sf = [f for f in source_files if f.filename == fn][0]
-                df = [f for f in dest_files if f.filename == fn][0]
-                bigger, smaller = sf.size > df.size and (sf, df) or (df, sf)
-                action_commands.append(f'cp "{bigger.full_path}" "{smaller.full_path}"')
+                sf = file_by_fn(source_files, fn)
+                df = file_by_fn(dest_files, fn)
+                if sf.size > df.size:
+                    action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
 
     print("\naction commands:")
     print("\n".join(action_commands))
