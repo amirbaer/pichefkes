@@ -1,10 +1,16 @@
 #!/bin/bash
 
-#TODO: since this script only creates the index list, there's not really a point in always running it on two directories at a time
-# I think I might change the interface and logic to run on one dir at a time
+
+# TODO:
+# - multiple extensions
+# - configurable in/out filter
+
+extensions="HEIC;JPG;JPEG;PNG;MOV;MP4;M4A;PNG"
+grep_in_filter="iphone se"
+grep_out_filter="eurotrip"
 
 if [[ $# < 2 ]]; then
-	echo "usage: $0 <dir> <output file> [<extension=HEIC>]"
+	echo "usage: $0 <dir> <output file> [<extensions=$extensions>] [<grep_in_filter=$grep_in_filter>] [<grep_out_filter=$grep_out_filter>]"
 	echo
 	echo "the script reads all the files with a certain extension in a folder,"
 	echo "checks each file's size and writes the output to a '|'-separated file"
@@ -13,7 +19,9 @@ fi
 
 dir="$1"
 output_file="$2"
-extension="${3-HEIC}"
+extensions="${3-$extensions}"
+grep_in_filter="${3-$grep_in_filter}"
+grep_out_filter="${3-$grep_out_filter}"
 
 work_dir="/tmp/cf-$RANDOM"
 mkdir "$work_dir"
@@ -21,8 +29,9 @@ echo "work dir: $work_dir"
 
 IFS=$'\n'
 
-s1="$work_dir/01_source_$extension.txt"
-s2="$work_dir/02_source_sorted_sized_$extension.txt"
+e=`echo $extensions | tr ';' '_'`
+s1="$work_dir/01_source_$e.txt"
+s2="$work_dir/02_source_sorted_sized_$e.txt"
 
 process_dir () {
 	id="$1"
@@ -31,8 +40,32 @@ process_dir () {
 	category="$4"
 
 	echo -n "reading $category dir [$id]... "
-	find "$id" -type f -iname "*.$extension" -exec realpath {} ';' > "$of1"
-	echo "found `wc -l $of1 | awk '{print $1}'` files"
+
+	# find
+	find_cmd_exe="/tmp/tmp-find-cmd"
+	ext_regex="-iname '*`echo $extensions | sed 's/;/'"'"' -or -iname '"'"'*./g'`'"
+	echo 'find "'$dir'" -type f \( '$ext_regex' \)' > $find_cmd_exe
+	chmod a+x $find_cmd_exe
+	files=`$find_cmd_exe` # couldn't get find to run properly otherwise
+	echo "found `echo "$files" | wc -l | awk '{print $1}'` files"
+
+	# filter find
+	echo -n "filtering files... "
+	if [ ! -z $grep_in_filter ]; then files=`echo "$files" | grep "$grep_in_filter"`; fi
+	if [ ! -z $grep_out_filter ]; then files=`echo "$files" | grep -v "$grep_out_filter"`; fi
+	echo "`echo "$files" | grep -v -e '^$' | wc -l | awk '{print $1}'` files left after filter"
+
+	if [ ! -z "$files" ]; then
+		echo "getting real paths... "
+		for item in $files; do
+			realpath "$item" >> "$of1"
+			echo -n "."
+		done
+		echo
+	else
+		echo "no files left after filter -> quitting"
+		exit
+	fi
 
 	echo "gathering file metadata..."
 	for f in `cat $of1`; do
