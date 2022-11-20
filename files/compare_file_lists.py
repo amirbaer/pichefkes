@@ -115,9 +115,9 @@ class FileIndexComparator:
         missing_pfs_dest = source_pfs - dest_pfs
         missing_pfs_source = dest_pfs - source_pfs
         if missing_pfs_dest:
-            print(f"missing in dest: {', '.join(missing_pfs_dest)}")
+            print(f"missing in dest: {', '.join(sorted(missing_pfs_dest))}")
         if missing_pfs_source:
-            print(f"missing in source: {', '.join(missing_pfs_source)}")
+            print(f"missing in source: {', '.join(sorted(missing_pfs_source))}")
 
         shared_pfs = source_pfs.intersection(dest_pfs)
 
@@ -148,11 +148,11 @@ class FileIndexComparator:
             same_fn_different_meta = s_d_fs_fns.intersection(d_s_fs_fns)
             if same_fn_different_meta:
                 print(" -> same filename, different metadata:")
-                for fn in same_fn_different_meta:
+                for fn in sorted(same_fn_different_meta):
                     sf = self._file_by_fn(source_files, fn)
                     df = self._file_by_fn(dest_files, fn)
                     if sf.size > df.size:
-                        self.action_commands.append(f'cp "{sf.full_path}" "{df.full_path}"')
+                        self.action_commands.append(f'cp -v "{sf.full_path}" "{df.full_path}"')
                     print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
 
             source_only_fs_fn = s_d_fs_fns - d_s_fs_fns
@@ -164,7 +164,7 @@ class FileIndexComparator:
                 for fn in source_only_fs_fn:
                     sf = self._file_by_fn(source_files, fn)
                     dpf = os.path.dirname(dest_files[0].full_path)
-                    self.action_commands.append(f'cp "{sf.full_path}" "{dpf}"')
+                    self.action_commands.append(f'cp -v "{sf.full_path}" "{dpf}"')
 
     def _file_by_fn(self, file_list, filename):
         return [f for f in file_list if f.filename == filename][0]
