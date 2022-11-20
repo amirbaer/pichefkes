@@ -1,13 +1,9 @@
 #!/bin/bash
 
 
-# TODO:
-# - multiple extensions
-# - configurable in/out filter
-
 extensions="HEIC;JPG;JPEG;PNG;MOV;MP4;M4A;PNG"
-grep_in_filter="iphone se"
-grep_out_filter="eurotrip"
+grep_in_filter="local"
+grep_out_filter="brought"
 
 if [[ $# < 2 ]]; then
 	echo "usage: $0 <dir> <output file> [<extensions=$extensions>] [<grep_in_filter=$grep_in_filter>] [<grep_out_filter=$grep_out_filter>]"
@@ -30,8 +26,17 @@ echo "work dir: $work_dir"
 IFS=$'\n'
 
 e=`echo $extensions | tr ';' '_'`
-s1="$work_dir/01_source_$e.txt"
-s2="$work_dir/02_source_sorted_sized_$e.txt"
+s0="$work_dir/00_run_params.txt"
+s1="$work_dir/01_files.txt"
+s2="$work_dir/02_files_sorted_sized.txt"
+
+cat > $s0 <<- EOM
+input_dir: $dir
+output_file: `realpath $output_file`
+extensions: $extensions
+grep_in_filter: $grep_in_filter
+grep_out_filter: $grep_out_filter
+EOM
 
 process_dir () {
 	id="$1"
