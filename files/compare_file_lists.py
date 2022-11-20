@@ -55,7 +55,7 @@ class FileIndex:
         file_list = []
         for line in open(list_fn).readlines():
             parent_folder, filename, size, uuid, full_path = line.split(sep)
-            file_list.append(File(filename, parent_folder, full_path.strip(), size, uuid))
+            file_list.append(File(filename, parent_folder, full_path.strip(), int(size), uuid))
         return file_list
 
     def _index(self, file_list: List[File]):
@@ -107,7 +107,7 @@ class FileIndexComparator:
         source_pfs = self.source.get_parent_folders()
         dest_pfs = self.dest.get_parent_folders()
 
-        self.action_commands = []
+        action_commands = []
 
         print(f"source parent folders: {len(source_pfs)}")
         print(f"dest parent folders: {len(dest_pfs)}")
@@ -140,47 +140,47 @@ class FileIndexComparator:
             # Comparison by Size & UUID
             sfs = set(source_files)
             dfs = set(dest_files)
-            s_d_fs = sfs - dfs
-            d_s_fs = dfs - sfs
-            print(f"comparison by size & UUID | missing in source: {len(d_s_fs)} | missing in dest: {len(s_d_fs)}")
-            s_d_fs_fns = set([f.filename for f in s_d_fs])
-            d_s_fs_fns = set([f.filename for f in d_s_fs])
-            same_fn_different_meta = s_d_fs_fns.intersection(d_s_fs_fns)
+            source_only_fs = sfs - dfs
+            dest_only_fs = dfs - sfs
+            print(f"comparison by size & UUID | missing in source: {len(dest_only_fs)} | missing in dest: {len(source_only_fs)}")
+            source_only_fns = set([f.filename for f in source_only_fs])
+            dest_only_fns = set([f.filename for f in dest_only_fs])
+            same_fn_different_meta = source_only_fns.intersection(dest_only_fns)
             if same_fn_different_meta:
                 print(" -> same filename, different metadata:")
                 for fn in sorted(same_fn_different_meta):
                     sf = self._file_by_fn(source_files, fn)
                     df = self._file_by_fn(dest_files, fn)
                     if sf.size > df.size:
-                        self.action_commands.append(f'cp -v "{sf.full_path}" "{df.full_path}"')
+                        action_commands.append(f'cp -v "{sf.full_path}" "{df.full_path}"')
                     print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
 
-            source_only_fs_fn = s_d_fs_fns - d_s_fs_fns
-            dest_only_fs_fn = d_s_fs_fns - s_d_fs_fns
-            if dest_only_fs_fn:
-                print(f" -> missing in source:\n%s" % '\n'.join(dest_only_fs_fn))
-            if source_only_fs_fn:
-                print(f" -> missing in dest:\n%s" % '\n'.join(source_only_fs_fn))
-                for fn in source_only_fs_fn:
+            source_only_fns = source_only_fns - same_fn_different_meta
+            dest_only_fns = dest_only_fns - same_fn_different_meta
+            if dest_only_fns:
+                print(f" -> missing in source:\n%s" % '\n'.join(dest_only_fns))
+            if source_only_fns:
+                print(f" -> missing in dest:\n%s" % '\n'.join(source_only_fns))
+                for fn in source_only_fns:
                     sf = self._file_by_fn(source_files, fn)
                     dpf = os.path.dirname(dest_files[0].full_path)
-                    self.action_commands.append(f'cp -v "{sf.full_path}" "{dpf}"')
+                    action_commands.append(f'cp -v "{sf.full_path}" "{dpf}"')
+
+        return action_commands
 
     def _file_by_fn(self, file_list, filename):
         return [f for f in file_list if f.filename == filename][0]
-
-    def export_action_commands(self, output_fn):
-        open(output_fn, 'w').write("\n".join(self.action_commands))
 
 #------------
 
 def main(source_fn, dest_fn):
     comparator = FileIndexComparator(source_fn, dest_fn)
-    comparator.compare_parent_folders()
+    action_commands = comparator.compare_parent_folders()
 
-    output_fn = f"/tmp/action-commands-{random.randrange(10000)}.sh"
-    comparator.export_action_commands(output_fn)
-    print("\naction commands:", output_fn)
+    if action_commands:
+        output_fn = f"/tmp/action-commands-{random.randrange(10000)}.sh"
+        open(output_fn, 'w').write("\n".join(action_commands))
+        print("\naction commands:", output_fn)
 
 #------------
 
