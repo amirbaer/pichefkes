@@ -2,8 +2,8 @@
 
 
 extensions="HEIC;JPG;JPEG;PNG;MOV;MP4;M4A;PNG"
-grep_in_filter="local"
-grep_out_filter="brought"
+grep_in_filter=""
+grep_out_filter=""
 
 if [[ $# < 2 ]]; then
 	echo "usage: $0 <dir> <output file> [<extensions=$extensions>] [<grep_in_filter=$grep_in_filter>] [<grep_out_filter=$grep_out_filter>]"
@@ -16,8 +16,8 @@ fi
 dir="$1"
 output_file="$2"
 extensions="${3-$extensions}"
-grep_in_filter="${3-$grep_in_filter}"
-grep_out_filter="${3-$grep_out_filter}"
+grep_in_filter="${4-$grep_in_filter}"
+grep_out_filter="${5-$grep_out_filter}"
 
 work_dir="/tmp/cf-$RANDOM"
 mkdir "$work_dir"
