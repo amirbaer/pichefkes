@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import random
 import os
 import sys
@@ -27,8 +29,8 @@ from typing import List, Union, Callable
 #------------
 
 COMP_CONFIG = {
-    replace_fn_func: lambda fn: fn.replace("_HEVC.MOV", ".MP4")
-    keys: ("rfilename", "size", "uuid")
+    "replace_fn_func": (lambda fn: fn.replace("_HEVC.MOV", ".MP4")),
+    "keys": ("rfilename", "size", "uuid"),
 }
 
 @dataclass
@@ -60,6 +62,9 @@ class File:
 @dataclass
 class FileSet:
     files: List[File]
+
+    def __len__(self):
+        return len(self.files)
 
     def append(self, file: File):
         self.files.append(file)
@@ -125,14 +130,15 @@ class FileIndex:
         attr = file_or_attr
         if isinstance(file_or_attr, File):
             attr = getattr(file_or_attr, attr_name)
+        return attr
     
     def _fileset_by_key(self, index, key) -> FileSet:
         paths = index[key]
-        return FileSet([self.path_to_files[path] for path in paths])
+        return FileSet(list(filter(None, [self.path_to_files.get(path) for path in paths])))
 
     def by_path(self, file_or_path: Union[File, str]) -> File:
         path = self._file_or_attr(file_or_path, "full_path")
-        return self.path_to_files[path]
+        return self.path_to_files.get(path)
 
     def by_name(self, file_or_name: Union[File, str]) -> FileSet:
         name = self._file_or_attr(file_or_name, "filename")
@@ -168,6 +174,8 @@ class FileIndexComparator:
             print(f"missing in dest: {', '.join(sorted(missing_pfs_dest))}")
         if missing_pfs_source:
             print(f"missing in source: {', '.join(sorted(missing_pfs_source))}")
+        
+        print("------------------------------")
 
         shared_pfs = source_pfs.intersection(dest_pfs)
 
@@ -181,10 +189,13 @@ class FileIndexComparator:
     def compare_by_parent_folder(self, pf):
         source_fs = self.source.by_parent_folder(pf)
         dest_fs = self.dest.by_parent_folder(pf)
-        print(f"[ {pf} | source: {len(source_fs)} files | dest: {len(dest_fs)}) files ]")
 
-        self.compare_file_sets_by_name(source_fs, dest_fs)
-        action_commands = self.compare_file_sets_by_size_and_uuid(source_fs, dest_fs)
+        #self.compare_file_sets_by_name(source_fs, dest_fs)
+        action_commands, log = self.compare_file_sets_by_size_and_uuid(source_fs, dest_fs)
+
+        if action_commands or log:
+            print(f"\n-- [ {pf} | source: {len(source_fs)} files | dest: {len(dest_fs)}) files ] --")
+            print(log)
 
         return action_commands
 
@@ -201,64 +212,39 @@ class FileIndexComparator:
         COMP_CONFIG["keys"] = ("size", "uuid")
         source_only, both, dest_only = source.diff_by(dest, rname=True)
 
-        # so here we have 3 filesets based on the intersection between the `source` and `dest`
-        # filesets (only S, only D, both S&D)
-        # this is based on a comparison according to 3 parameters (name, size, uuid)
+        log = ""
+        action_commands = []
 
-        # the next thing I want here is to get a list of the files whose names are identical but
-        # have different size or uuid
 
-        # tbh not sure why not just compare by (size, uuid) then
-        # if F1 !(s,u)= F2...
-        # I guess I do need the filename for the original comparison
-        # because if F1 =(s,u)= F2 but F1 !(n)= F2 then I don't necessarily want to count it as the
-        # same, do I? actually I guess I do because the uuid is quite unique (if the size wasn't
-        # good enough)
-
-        # so what am I trying to do here really?
-        # which categories of files do I want to see?
-
-        # why not just get the 3 diff categories based on size & uuid?
-        # i might get IMG_01.jpg which has the same s&u as IMG_02.jpg, but then I assume it's really
-        # the same file
-        # i might get s/IMG_01.jpg which has a different s&u than d/IMG_01.jpg but then I also want
-        # to count them as different
-
-        # let's just try it without filename
+        # missing in each side
         if source_only or dest_only:
-            print(f"comparison by size & UUID | source only: {len(source_only)} | shared: {len(both)} | dest only: {len(dest_only)}")
-            print(" -> source only:\n%s" % '\n'.join(map(lambda f: f.filename, source_only.files)))
-            print(" -> dest only:\n%s" % '\n'.join(map(lambda f: f.filename, dest_only.files)))
+            log += f"comparison by size & UUID | source only: {len(source_only)} | shared: {len(both)} | dest only: {len(dest_only)}\n"
+            if source_only:
+                log += " -> source only:\n%s\n" % '\n'.join(map(lambda f: f.filename, source_only.files))
+            if dest_only:
+                log += " -> dest only:\n%s\n" % '\n'.join(map(lambda f: f.filename, dest_only.files))
 
             # action items for source-only files
             dest_pf = dest.files[0].parent_folder
-            for file in sorted(source_only.files, key=lambda f: f.full_path):
-                # I guess part of the issue is that here I am overwriting a
-                # same-name-different-metadata dest file, and for that I need to find the dest file
-                # that has the same name
-                # BUT - it's actually enough just to have the parent folder, because if the files do
-                # indeed have the same name than pfolder/source.name == dest.full_path
+            for sf in sorted(source_only.files, key=lambda f: f.full_path):
 
-                # still, no danger of copying a smaller file on top of a larger file? I think there
-                # is because the assumption is that we want to copy the source into the dest
-                if sf.size > df.size:
-                    action_commands.append(f'cp -v "{sf.full_path}" "{df.full_path}"')
-                print(f"{fn} || source // size: {sf.size} | UUID: {sf.uuid} || dest // size: {df.size} | UUID: {df.uuid}")
+                # XXX: rfilename or filename
+                dest_path = os.path.join(dest_pf, sf.rfilename)
+                df = self.dest.by_path(dest_path)
+                if df and sf.size < df.size:
+                    action_commands.append(f'echo source file smaller than dest file # cp -v "{sf.full_path}" "{dest_path}"')
+                else:
+                    action_commands.append(f'cp -v "{sf.full_path}" "{dest_path}"')
 
-        source_only_fns = source_only_fns - same_fn_different_meta
-        dest_only_fns = dest_only_fns - same_fn_different_meta
-        if dest_only_fns:
-            print(f" -> missing in source:\n%s" % '\n'.join(dest_only_fns))
-        if source_only_fns:
-            print(f" -> missing in dest:\n%s" % '\n'.join(source_only_fns))
-            for fn in source_only_fns:
-                sf = self._file_by_fn(source_fs, fn)
-                dpf = os.path.dirname(dest_fs[0].full_path)
-                action_commands.append(f'cp -v "{sf.full_path}" "{dpf}"')
+                """
+                print(f"source // name: {sf.filename} | rname: {sf.rfilename} | size: {sf.size} | UUID: {sf.uuid}", end="")
+                if df:
+                    print(f" || dest // name: {df.filename} | rname: {df.rfilename} | size: {df.size} | UUID: {df.uuid}")
+                else:
+                    print()
+                """
 
-
-    def _file_by_fn(self, file_list, filename):
-        return [f for f in file_list if f.filename == filename][0]
+        return action_commands, log
 
 #------------
 
