@@ -220,9 +220,9 @@ class FileIndexComparator:
         if source_only or dest_only:
             log += f"comparison by size & UUID | source only: {len(source_only)} | shared: {len(both)} | dest only: {len(dest_only)}\n"
             if source_only:
-                log += " -> source only:\n%s\n" % '\n'.join(map(lambda f: f.filename, source_only.files))
+                log += " -> source only:\n%s\n" % '\n'.join(sorted(map(lambda f: f.filename, source_only.files)))
             if dest_only:
-                log += " -> dest only:\n%s\n" % '\n'.join(map(lambda f: f.filename, dest_only.files))
+                log += " -> dest only:\n%s\n" % '\n'.join(sorted(map(lambda f: f.filename, dest_only.files)))
 
             # action items for source-only files
             dest_pf = dest.files[0].parent_folder
