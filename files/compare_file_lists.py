@@ -205,8 +205,8 @@ class FileIndexComparator:
 
         if source_only or dest_only:
             print(f"comparison by name | source only: {len(source_only)} | shared: {len(both)} | dest only: {len(dest_only)}")
-            print(" -> source only:\n%s" % '\n'.join(map(lambda f: f.filename, source_only.files)))
-            print(" -> dest only:\n%s" % '\n'.join(map(lambda f: f.filename, dest_only.files)))
+            print(" -> source only:\n%s" % '\n'.join(sorted(map(lambda f: f.filename, source_only.files))))
+            print(" -> dest only:\n%s" % '\n'.join(sorted(map(lambda f: f.filename, dest_only.files))))
 
     def compare_file_sets_by_size_and_uuid(self, source: FileSet, dest: FileSet):
         COMP_CONFIG["keys"] = ("size", "uuid")
