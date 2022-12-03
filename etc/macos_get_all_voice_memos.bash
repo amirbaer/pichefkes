@@ -36,7 +36,7 @@ if [[ $# == 0 ]] || [[ $# > 2 ]]; then
     echo "(*) or only last <tail> (#) of memos"
 	echo
 	echo "CONFIGURATION"
-	echo '$VM_TZ - automatically convert UTC dates with no explicit timezone; example values: +2, -3'
+	echo '$VM_TZ - automatically convert UTC dates with no explicit timezone; example values: +2, -3 [default: no]'
 	echo '$VM_TZ_SUFFIX - add a timezone suffix to datetime strings; value is disregarded, just needs to have some value'
     exit 1
 fi
@@ -46,7 +46,7 @@ fi
 #-- Main --#
 
 echo "Run configuration:"
-echo "VM_TZ=$VM_TZ"
+echo "VM_TZ= `if ! [ -z $VM_TZ ]; then echo echo $VM_TZ; else echo no; fi`"
 echo "VM_TZ_SUFFIX=`if ! [ -z ${VM_TZ_SUFFIX} ]; then echo yes; else echo no; fi`"
 echo
 
@@ -94,6 +94,7 @@ for line in `cat "$tmp_file"`; do
 
 	# No timezone -> add suffix to indicate UTC
 	else
+		# If this variable is set
 		if ! [ -z ${VM_TZ} ]; then
 			processed_datetime=`date-math $VM_TZ $datetime`;
 			tz_suffix="_UTC$VM_TZ"

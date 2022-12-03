@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-extensions="HEIC;JPG;JPEG;PNG;MOV;MP4;M4A;PNG"
+extensions="HEIC;JPG;JPEG;PNG;MOV;MP4;M4A;PNG;WAV;MP3"
 grep_in_filter=""
 grep_out_filter=""
 
@@ -76,9 +76,10 @@ process_dir () {
 	for f in `cat $of1`; do
 		b=$(basename "$f")
 		pd=$(basename $(dirname "$f"))
+		m=$(md5sum "$f" | awk '{print $1}')
 		fs=$(du -k "$f" | awk '{print $1}')
 		fco=$(exiftool "$f" | grep 'Content Identifier' | awk '{print $4}') #cut -d ':' -f 2 | tr -d ' ')
-		echo "$pd|$b|$fs|$fco|$f" >> "$of2" # NOTE: this directly affects the parsing the complementary python script
+		echo "$pd|$b|$fs|$fco|$m|$f" >> "$of2" # NOTE: this directly affects the parsing the complementary python script
 		echo -n "."
 	done
 
