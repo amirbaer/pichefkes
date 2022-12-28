@@ -46,14 +46,14 @@ fi
 #-- Main --#
 
 echo "Run configuration:"
-echo "VM_TZ= `if ! [ -z $VM_TZ ]; then echo echo $VM_TZ; else echo no; fi`"
+echo "VM_TZ=`if ! [ -z $VM_TZ ]; then echo $VM_TZ; else echo no; fi`"
 echo "VM_TZ_SUFFIX=`if ! [ -z ${VM_TZ_SUFFIX} ]; then echo yes; else echo no; fi`"
 echo
 
 output_folder="$1"
 
 tmp_file="/tmp/voice-memos-$RANDOM"
-sep=";"
+sep="^"
 
 
 # Read recording entries from DB
@@ -94,7 +94,7 @@ for line in `cat "$tmp_file"`; do
 
 	# No timezone -> add suffix to indicate UTC
 	else
-		# If this variable is set
+		# If this variable is set shift the datetime
 		if ! [ -z ${VM_TZ} ]; then
 			processed_datetime=`date-math $VM_TZ $datetime`;
 			tz_suffix="_UTC$VM_TZ"
