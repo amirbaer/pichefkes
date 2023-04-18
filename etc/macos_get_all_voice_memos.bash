@@ -36,7 +36,7 @@ if [[ $# == 0 ]] || [[ $# > 2 ]]; then
     echo "(*) or only last <tail> (#) of memos"
 	echo
 	echo "CONFIGURATION"
-	echo '$VM_TZ - automatically convert UTC dates with no explicit timezone; example values: +2, -3 [default: no]'
+	echo '$VM_TZ - automatically convert UTC dates with no explicit timezone; example values: +2, -3 [default: +2]'
 	echo '$VM_TZ_SUFFIX - add a timezone suffix to datetime strings; value is disregarded, just needs to have some value'
     exit 1
 fi
@@ -44,6 +44,8 @@ fi
 
 
 #-- Main --#
+
+if [ -z $VM_TZ ]; then VM_TZ="+2"; fi
 
 echo "Run configuration:"
 echo "VM_TZ=`if ! [ -z $VM_TZ ]; then echo $VM_TZ; else echo no; fi`"
