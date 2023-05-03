@@ -45,7 +45,7 @@ fi
 
 #-- Main --#
 
-if [ -z $VM_TZ ]; then VM_TZ="+2"; fi
+if [ -z $VM_TZ ]; then VM_TZ="+3"; fi
 
 echo "Run configuration:"
 echo "VM_TZ=`if ! [ -z $VM_TZ ]; then echo $VM_TZ; else echo no; fi`"
