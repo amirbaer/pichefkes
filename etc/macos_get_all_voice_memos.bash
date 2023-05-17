@@ -67,6 +67,7 @@ if [[ $# == 2 ]]; then
 fi
 
 # Iterate recording entries
+truncated_names=()
 IFS=$'\n'
 for line in `cat "$tmp_file"`; do
 
@@ -122,12 +123,36 @@ for line in `cat "$tmp_file"`; do
 
 	#-- Final copy & rename
 
+	# truncate names which are too long (macos limits file names to 255 characters)
+	is_truncated=false
+	if [[ ${#name} -ge 200 ]]; then
+		truncated+=("${processed_datetime} $name")
+		name="${name:0:200}..."
+		is_truncated=true
+	fi
+
     new_name="${processed_datetime} $name.$ext"   # 2021-12-30--14-52-13 birthday conversation.mp4
     cp "$path" "$output_folder/$new_name"
 	audio-set-title-from-filename-noext "$output_folder/$new_name"
-    echo -n "."
+
+	if ! $is_truncated; then
+		echo -n "."
+	else
+		echo -n "t"
+	fi
 
 done
+
+if [[ ${#truncated[@]} -gt 0 ]]; then
+	echo
+	echo
+	echo "truncated names:"
+    for item in "${truncated[@]}"; do
+        echo "$item" >> "$output_folder/truncated.txt"
+    done
+	cat "$output_folder/truncated.txt"
+fi
+
 
 echo
 echo "done."
