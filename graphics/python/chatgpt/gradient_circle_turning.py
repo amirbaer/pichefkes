@@ -54,6 +54,7 @@ def create_gradient_gif(filename, img_size, start_color1, start_color2, end_colo
         i += 1
 
     # Save frames as a GIF
+    print("saving to file...")
     frames[0].save(filename, save_all=True, append_images=frames[1:], optimize=False, duration=100, loop=0)
 
     # Display the GIF
