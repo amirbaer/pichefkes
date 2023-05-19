@@ -3,18 +3,18 @@
 import os
 import sys
 from PIL import Image
-import colorsys
+import tqdm
 
 # Get the number of frames and reverse flag from the command line arguments
-num_frames = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+num_frames = int(sys.argv[1]) if len(sys.argv) > 1 else 16
 reverse = sys.argv[2] == 'reverse' if len(sys.argv) > 2 else False
 
 # Define the size of the image
-width = 800
-height = 800
+width = 3840
+height = 2160
 
 # Define the output folder name
-output_folder = 'gradient_greyscale'
+output_folder = 'data/gradient_greyscale'
 
 # Create the output folder if it doesn't exist
 if not os.path.exists(output_folder):
@@ -28,7 +28,7 @@ for filename in os.listdir(output_folder):
         last_index = max(last_index, index)
 
 # Iterate over each frame
-for frame in range(num_frames):
+for frame in tqdm.tqdm(range(num_frames), desc="generating frames"):
     # Create a new image with the given size
     img = Image.new('RGB', (width, height))
 
@@ -46,7 +46,7 @@ for frame in range(num_frames):
             img.putpixel((i, j), (gray, gray, gray))
 
     # Save the image with a batch prefix and a 5-digit index
-    img.save(os.path.join(output_folder, f'01_{last_index + frame + 1:05d}.png'))
+    img.save(os.path.join(output_folder, f'01_%s{last_index + frame + 1:05d}.png' % (reverse and "rev_" or "")))
 
 # Display the last frame
 #display(img)

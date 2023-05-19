@@ -44,7 +44,7 @@ def create_gradient_frames(output_folder, colors, num_frames, img_size):
 def main():
     # Initialize the parser
     parser = argparse.ArgumentParser(description="Generate gradient frames from a palette")
-    parser.add_argument('--output_folder', type=str, default='data/gradient_of_solids', help="Folder to output frames")
+    parser.add_argument('--output_folder', type=str, default='data/gradient_from_palette', help="Folder to output frames")
     parser.add_argument('--palette', type=str, nargs='+', default=['#FF0000', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF'], help="List of hex colors")
     parser.add_argument('--num_frames', type=int, default=100, help="Number of frames to generate")
     parser.add_argument('--img_size', type=int, nargs=2, default=[3840, 2160], help="Image size [width, height]")
