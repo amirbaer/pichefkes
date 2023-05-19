@@ -4,10 +4,11 @@ import os
 from PIL import Image
 #from IPython.display import display
 import colorsys
+import tqdm
 
 # Define the size of the image
-width = 800
-height = 800
+width = 3840
+height = 2160
 
 # Define the number of frames
 num_frames = 100
@@ -27,7 +28,7 @@ first_colors = [
 ]
 
 # Define the output folder name
-output_folder = 'gradient_of_solids'
+output_folder = 'data/gradient_of_solids'
 
 # Create the output folder if it doesn't exist
 if not os.path.exists(output_folder):
@@ -41,7 +42,7 @@ for filename in os.listdir(output_folder):
         last_index = max(last_index, index)
 
 # Iterate over each frame
-for frame in range(num_frames):
+for frame in tqdm.tqdm(range(num_frames), desc="generating frames"):
     # Create a new image with the given size
     img = Image.new('RGB', (width, height))
 
