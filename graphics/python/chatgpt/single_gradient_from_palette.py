@@ -9,6 +9,8 @@ def get_palette_from_images(folder):
     """Extract the color palette from the images in a folder."""
     palette = []
     for filename in os.listdir(folder):
+        if not filename.endswith(('jpg', 'png', 'jpeg')):
+            continue
         image_path = os.path.join(folder, filename)
         image = Image.open(image_path)
         color = image.getpixel((0, 0))
@@ -38,11 +40,19 @@ def main(args):
     else:
         palette = args.palette.split(',')
 
+    last_index = 0
+    for filename in os.listdir(args.output_folder):
+        if filename.endswith('.png'):
+            index = int(filename.split('_')[1].split('.')[0])  # Get the index from the filename
+            last_index = max(last_index, index)
+
+    last_index += 1
+
     # Generate the gradient images
     for i in range(args.num_images):
         chosen_colors = random.sample(palette, args.colors_per_gradient)
         image = generate_gradient(chosen_colors, args.width, args.height, args.direction)
-        image.save(os.path.join(args.output_folder, f'gradient_{i}.png'))
+        image.save(os.path.join(args.output_folder, f'gradient_{last_index + i}.png'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate gradient images.')
