@@ -22,7 +22,8 @@ def create_gradient(colors, output_dimensions, direction):
     # Create an array that goes from 0 to 1 with as many steps as there are colors
     indices = np.linspace(0, 1, len(colors))
     # Create a function that will generate the gradient along one axis
-    gradient_func = np.vectorize(lambda x: np.interp(x, indices, colors, axis=0))
+    gradient_func = lambda x: np.array([np.interp(x, indices, colors[:, i]) for i in range(3)])
+    gradient_func = np.vectorize(gradient_func, signature='()->(n)')
     # Create the gradient image
     if direction == 'horizontal':
         gradient = gradient_func(np.linspace(0, 1, output_dimensions[1])).astype(int)
@@ -65,4 +66,3 @@ if __name__ == "__main__":
 
     # Create the images
     create_images(source_image, args.num_colors, args.num_images, args.output_dimensions, args.output_dir, args.blur)
-
