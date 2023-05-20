@@ -32,36 +32,37 @@ def create_gradient(colors, output_dimensions):
     gradient = np.repeat(gradient[np.newaxis, :], output_dimensions[0], axis=0)
     return np.rot90(gradient)
 
-def create_images(source_image, num_colors, num_images, output_dimensions, output_dir, blur):
-    # Extract the colors from the source image
-    colors = extract_colors(source_image, num_colors)
+def create_images(input_dir, output_dir, num_colors, num_images, output_dimensions):
+    # Get all files in the input directory
+    files = os.listdir(input_dir)
+    # Filter out non-image files
+    images = [file for file in files if file.endswith(('jpg', 'png', 'jpeg'))]
 
-    for i in tqdm.tqdm(range(num_images), desc="generating images"):
-        if blur:
-            # Blur the image
-            image_blurred = cv2.GaussianBlur(source_image, (99, 99), 30)
-            # Resize it to the output dimensions
-            image_resized = cv2.resize(image_blurred, (output_dimensions[1], output_dimensions[0]))  # cv2 uses width x height
-            # Write the image
-            cv2.imwrite(os.path.join(output_dir, f'image_blurred_{i}.jpg'), image_resized)
-        else:
+    for image_file in tqdm.tqdm(images, desc="generating images"):
+        # Load the source image
+        source_image = cv2.imread(os.path.join(input_dir, image_file))
+        image_basename, ext = os.path.splitext(image_file)
+        # Extract the colors from the source image
+        colors = extract_colors(source_image, num_colors)
+
+        for i in range(num_images):
             # Create a gradient image
             gradient = create_gradient(colors, output_dimensions)
             # Write the image
-            cv2.imwrite(os.path.join(output_dir, f'image_gradient_{i}.jpg'), gradient)
+            output_file = f'image_gradient_{image_basename}_{i}.{ext}'
+            cv2.imwrite(os.path.join(output_dir, output_file), gradient)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Script for creating gradient images from a source image', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('source_image', type=str, help='Path to the source image')
+    parser = argparse.ArgumentParser(description='Script for creating gradient images from source images', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('input_dir', type=str, help='Directory containing source images')
     parser.add_argument('output_dir', type=str, help='Directory to save the generated images')
     parser.add_argument('-c', '--num_colors', type=int, default=5, help='Number of colors per gradient')
     parser.add_argument('-n', '--num_images', type=int, default=5, help='Number of variations to create')
     parser.add_argument('--output_dimensions', type=int, nargs=2, default=[3840, 2160], help='Output image dimensions')
-    parser.add_argument('--blur', action='store_true', help='If set, apply a blur effect on the source image instead of generating the gradient from scratch')
     args = parser.parse_args()
 
-    # Load the source image
-    source_image = cv2.imread(args.source_image)
+    # Create the output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Create the images
-    create_images(source_image, args.num_colors, args.num_images, args.output_dimensions, args.output_dir, args.blur)
+    # Generate gradient images
+    create_images(args.input_dir, args.output_dir, args.num_colors, args.num_images, args.output_dimensions)
