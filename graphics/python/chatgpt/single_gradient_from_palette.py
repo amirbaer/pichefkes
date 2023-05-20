@@ -6,15 +6,17 @@ import argparse
 from PIL import Image
 
 def get_palette_from_images(folder):
-    """Extract the color palette from the image filenames in a folder."""
+    """Extract the color palette from the images in a folder."""
     palette = []
     for filename in os.listdir(folder):
-        color = os.path.splitext(filename)[0]  # remove the extension
+        image_path = os.path.join(folder, filename)
+        image = Image.open(image_path)
+        color = image.getpixel((0, 0))
         palette.append(color)
     return palette
 
 def generate_gradient(colors, width, height, direction):
-    """Generate a gradient image given a list of colors, size and direction."""
+    """Generate a gradient image given a list of colors, size, and direction."""
     base = Image.new('RGB', (width, height), colors[0])
     top = Image.new('RGB', (width, height), colors[-1])
     mask = Image.new('L', (width, height))
@@ -44,20 +46,13 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate gradient images.')
-    parser.add_argument('palette', type=str, help='A comma-separated list of colors, or a folder of single-color images named with their color.')
-    parser.add_argument('output_folder', type=str)
-    parser.add_argument('--num-images', type=int, default=10,
-                        help='The number of gradient images to generate.')
-    parser.add_argument('--colors-per-gradient', type=int, default=2,
-                        help='The number of colors to include in each gradient.')
-    parser.add_argument('--direction', type=str, default='horizontal',
-                        choices=['horizontal', 'vertical'], 
-                        help='The direction of the gradient.')
-    parser.add_argument('--width', type=int, default=3840,
-                        help='The width of the generated images.')
-    parser.add_argument('--height', type=int, default=2160,
-                        help='The height of the generated images.')
+    parser.add_argument('palette', type=str, help='A comma-separated list of colors or a folder of single-color images.')
+    parser.add_argument('output_folder', type=str, help='The output folder where generated images will be saved.')
+    parser.add_argument('-n', '--num-images', type=int, default=10, help='The number of gradient images to generate.')
+    parser.add_argument('-c', '--colors-per-gradient', type=int, default=2, help='The number of colors to include in each gradient.')
+    parser.add_argument('--direction', type=str, default='horizontal', choices=['horizontal', 'vertical'], help='The direction of the gradient.')
+    parser.add_argument('--width', type=int, default=3840, help='The width of the generated images.')
+    parser.add_argument('--height', type=int, default=2160, help='The height of the generated images.')
     args = parser.parse_args()
-
 
     main(args)
