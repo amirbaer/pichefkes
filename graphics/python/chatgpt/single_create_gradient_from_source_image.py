@@ -6,6 +6,7 @@ import os
 import argparse
 from sklearn.cluster import KMeans
 from random import choice
+from numpy.random import shuffle
 import tqdm
 
 def extract_colors(image, num_colors):
@@ -18,19 +19,17 @@ def extract_colors(image, num_colors):
     # Return the colors
     return colors
 
-def create_gradient(colors, output_dimensions, direction):
+def create_gradient(colors, output_dimensions):
+    # Randomly shuffle the colors to create variance in the proportions of the colors
+    shuffle(colors)
     # Create an array that goes from 0 to 1 with as many steps as there are colors
     indices = np.linspace(0, 1, len(colors))
     # Create a function that will generate the gradient along one axis
     gradient_func = lambda x: np.array([np.interp(x, indices, colors[:, i]) for i in range(3)])
     gradient_func = np.vectorize(gradient_func, signature='()->(n)')
     # Create the gradient image
-    if direction == 'horizontal':
-        gradient = gradient_func(np.linspace(0, 1, output_dimensions[1])).astype(int)
-        gradient = np.repeat(gradient[np.newaxis, :], output_dimensions[0], axis=0)
-    else:  # vertical
-        gradient = gradient_func(np.linspace(0, 1, output_dimensions[0])).astype(int)
-        gradient = np.repeat(gradient[:, np.newaxis], output_dimensions[1], axis=1)
+    gradient = gradient_func(np.linspace(0, 1, output_dimensions[1])).astype(int)
+    gradient = np.repeat(gradient[np.newaxis, :], output_dimensions[0], axis=0)
     return gradient
 
 def create_images(source_image, num_colors, num_images, output_dimensions, output_dir, blur):
@@ -42,12 +41,12 @@ def create_images(source_image, num_colors, num_images, output_dimensions, outpu
             # Blur the image
             image_blurred = cv2.GaussianBlur(source_image, (99, 99), 30)
             # Resize it to the output dimensions
-            image_resized = cv2.resize(image_blurred, output_dimensions[::-1])  # cv2 uses width x height
+            image_resized = cv2.resize(image_blurred, output_dimensions)  # cv2 uses width x height
             # Write the image
             cv2.imwrite(os.path.join(output_dir, f'image_blurred_{i}.jpg'), image_resized)
         else:
             # Create a gradient image
-            gradient = create_gradient(colors, output_dimensions, direction=choice(['horizontal', 'vertical']))
+            gradient = create_gradient(colors, output_dimensions)
             # Write the image
             cv2.imwrite(os.path.join(output_dir, f'image_gradient_{i}.jpg'), gradient)
 
