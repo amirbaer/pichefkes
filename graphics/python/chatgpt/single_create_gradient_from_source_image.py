@@ -30,7 +30,7 @@ def create_gradient(colors, output_dimensions):
     # Create the gradient image
     gradient = gradient_func(np.linspace(0, 1, output_dimensions[1])).astype(int)
     gradient = np.repeat(gradient[np.newaxis, :], output_dimensions[0], axis=0)
-    return gradient
+    return np.rot90(gradient)
 
 def create_images(source_image, num_colors, num_images, output_dimensions, output_dir, blur):
     # Extract the colors from the source image
@@ -41,7 +41,7 @@ def create_images(source_image, num_colors, num_images, output_dimensions, outpu
             # Blur the image
             image_blurred = cv2.GaussianBlur(source_image, (99, 99), 30)
             # Resize it to the output dimensions
-            image_resized = cv2.resize(image_blurred, output_dimensions)  # cv2 uses width x height
+            image_resized = cv2.resize(image_blurred, (output_dimensions[1], output_dimensions[0]))  # cv2 uses width x height
             # Write the image
             cv2.imwrite(os.path.join(output_dir, f'image_blurred_{i}.jpg'), image_resized)
         else:
