@@ -35,10 +35,7 @@ def generate_gradient(colors, width, height, direction):
 
 def main(args):
     # Get the color palette
-    if os.path.isdir(args.palette):
-        palette = get_palette_from_images(args.palette)
-    else:
-        palette = args.palette.split(',')
+    palette = args.palette.split(',')
 
     last_index = 0
     for filename in os.listdir(args.output_folder):
@@ -56,7 +53,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate gradient images.')
-    parser.add_argument('palette', type=str, help='A comma-separated list of colors or a folder of single-color images.')
+    parser.add_argument('palette', type=str, help='A comma-separated list of colors')
     parser.add_argument('output_folder', type=str, help='The output folder where generated images will be saved.')
     parser.add_argument('-n', '--num-images', type=int, default=10, help='The number of gradient images to generate.')
     parser.add_argument('-c', '--colors-per-gradient', type=int, default=2, help='The number of colors to include in each gradient.')
