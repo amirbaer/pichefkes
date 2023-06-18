@@ -19,12 +19,20 @@ void processVideo(const string& inputVideoPath, const string& outputVideoPrefix,
     double fps = video.get(CAP_PROP_FPS);
     int width = video.get(CAP_PROP_FRAME_WIDTH);
     int height = video.get(CAP_PROP_FRAME_HEIGHT);
+    int totalFrames = video.get(CAP_PROP_FRAME_COUNT);
+
+    // Progress indication variables
+    int processedFrames = 0;
+    int progressPercentage = 0;
+    int prevProgressPercentage = -1;
+
+    // Create a list to store non-black segments
+    vector<Rect> segments;
 
     // Process video frames
     Mat frame;
     int segmentCount = 1;
     bool isSegment = false;
-    vector<Rect> segments;
     while (video.read(frame)) {
         // Convert frame to grayscale
         Mat grayscaleFrame;
@@ -40,14 +48,25 @@ void processVideo(const string& inputVideoPath, const string& outputVideoPrefix,
                 segments.back().width++;
             } else {
                 // Start a new segment
-                segments.emplace_back(frame.cols, frame.rows, 0, segmentCount);
+                segments.emplace_back(frame.cols, frame.rows, processedFrames, segmentCount);
                 isSegment = true;
             }
         } else {
             // End the current segment
             isSegment = false;
         }
+
+        // Update progress indication
+        processedFrames++;
+        progressPercentage = (int)((processedFrames / (double)totalFrames) * 100);
+        if (progressPercentage != prevProgressPercentage) {
+            cout << "Progress: " << progressPercentage << "%" << endl;
+            prevProgressPercentage = progressPercentage;
+        }
     }
+
+    // Release video capture
+    video.release();
 
     // Export each non-black segment as a separate video
     for (const Rect& segment : segments) {
@@ -56,7 +75,12 @@ void processVideo(const string& inputVideoPath, const string& outputVideoPrefix,
         int endFrame = segment.x + segment.width;
 
         // Reset video capture to the beginning
-        video.set(CAP_PROP_POS_FRAMES, startFrame);
+        video.open(inputVideoPath);
+
+        // Skip frames until the start frame of the segment
+        for (int frameIndex = 0; frameIndex < startFrame; ++frameIndex) {
+            video.read(frame);
+        }
 
         // Create output video writer
         stringstream ss;
@@ -81,9 +105,6 @@ void processVideo(const string& inputVideoPath, const string& outputVideoPrefix,
 
         segmentCount++;
     }
-
-    // Release the video capture
-    video.release();
 
     cout << "Video processing complete." << endl;
 }
