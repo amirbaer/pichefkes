@@ -7,6 +7,8 @@ VOICE_MEMOS_FOLDER="$HOME/Library/Group Containers/group.com.apple.VoiceMemos.sh
 VOICE_MEMOS_DB="$VOICE_MEMOS_FOLDER/CloudRecordings.db"
 VOICE_MEMOS_SQL_QUERY="select ZPATH, ZEVICTIONDATE, ZENCRYPTEDTITLE from ZCLOUDRECORDING order by ZPATH;"
 
+FILENAME_MAX_LENGTH=100
+
 
 #-- Functions --#
 
@@ -29,6 +31,7 @@ fi
 output_folder="$1"
 
 tmp_file="/tmp/voice-memos-$RANDOM"
+tmp_err_file="/tmp/voice-memos-err-$RANDOM"
 sep="^"
 
 
@@ -76,15 +79,15 @@ for line in `cat "$tmp_file"`; do
 
 	# truncate names which are too long (macos limits file names to 255 characters)
 	is_truncated=false
-	if [[ ${#name} -ge 200 ]]; then
+	if [[ ${#name} -ge $FILENAME_MAX_LENGTH ]]; then
 		truncated+=("${formatted_datetime} $name")
-		name="${name:0:200}..."
+		name="${name:0:$FILENAME_MAX_LENGTH}..."
 		is_truncated=true
 	fi
 
     new_name="${formatted_datetime} $name.$ext"   # 2021-12-30--14-52-13 birthday conversation.mp4
     cp "$full_path" "$output_folder/$new_name"
-	audio-set-title-from-filename-noext "$output_folder/$new_name"
+	audio-set-title-from-filename-noext "$output_folder/$new_name" >> $tmp_err_file 2>&1
 
 	if ! $is_truncated; then
 		echo -n "."
@@ -102,6 +105,10 @@ if [[ ${#truncated[@]} -gt 0 ]]; then
         echo "$item" >> "$output_folder/truncated.txt"
     done
 	cat "$output_folder/truncated.txt"
+    echo
+    echo
+    echo "set title errors:"
+    cat $tmp_err_file
 fi
 
 
