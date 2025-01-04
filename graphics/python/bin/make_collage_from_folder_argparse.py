@@ -64,6 +64,7 @@ def main():
 
     print("sqrt(%d) = %f" % (count, sqrt))
     print("creating an %d (c) x %d (r) collage" % (cols, rows))
+    print("collage size: %d (w) x %d (h)" % canvas_size)
     create_collage(pics, *canvas_size, cols, rows, args.output)
 
 

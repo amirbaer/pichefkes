@@ -39,10 +39,10 @@ DEFAULT_CANVAS_SIZE = (3000, 3000)
 
 
 def create_collage(paths, canvas_width, canvas_height, cols, rows, output):
-    canvas_width, canvas_height = DEFAULT_CANVAS_SIZE
+    #canvas_width, canvas_height = DEFAULT_CANVAS_SIZE
     cell_width, cell_height = get_cell_size_by_canvas_and_grid(canvas_width, canvas_height, cols, rows)
 
-    new_image = Image.new('RGB', DEFAULT_CANVAS_SIZE)
+    new_image = Image.new('RGB', (canvas_width, canvas_height))
     cursor = (0,0)
     for path in paths:
         # place image
