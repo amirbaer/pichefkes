@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/env python3.12
 
 import argparse
 import math
@@ -59,8 +59,12 @@ def main():
     cols = math.ceil(sqrt)
     rows = cols * (cols - 1) < count and math.ceil(sqrt) or math.floor(sqrt)
 
+    if args.size_by_tiles:
+        cols, rows = args.size_by_tiles
+
     print("sqrt(%d) = %f" % (count, sqrt))
-    print("creating an %d x %d collage" % (cols, rows))
+    print("creating an %d (c) x %d (r) collage" % (cols, rows))
+    print("collage size: %d (w) x %d (h)" % canvas_size)
     create_collage(pics, *canvas_size, cols, rows, args.output)
 
 
