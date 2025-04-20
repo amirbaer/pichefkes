@@ -8,44 +8,38 @@ from tqdm import tqdm
 import argparse
 from pydub import AudioSegment
 
-def get_audio_duration(file_path):
-    """Get duration of audio file in seconds."""
-    audio = AudioSegment.from_file(file_path)
-    return len(audio) / 1000.0
-
 def transcribe_with_progress(file_path):
-    """Transcribe audio file with progress simulation."""
+    """Transcribe audio file with progress bar."""
     # Load the model (downloads first time)
     print("Loading Whisper model...")
     model = load_model("base")
     
-    # Get audio duration
-    duration = get_audio_duration(file_path)
-    
-    # Start transcription with simulated progress
+    print("\nTranscribing...")
     start_time = time.time()
-    progress_bar = tqdm(total=100, desc="Transcribing", unit="%")
     
     try:
-        # Run transcription
-        result = model.transcribe(file_path, language="he")
+        # Create progress bar without percentage (will show elapsed time instead)
+        progress_bar = tqdm(total=None, desc="Processing", unit=" segments")
         
-        # Simulate progress updates
-        for i in range(101):
-            time.sleep(duration / 100 / 2)  # Simulate progress proportional to duration
+        def progress_callback(progress):
+            # Update progress bar position by 1 for each segment
             progress_bar.update(1)
+        
+        result = model.transcribe(
+            file_path,
+            language="he",
+            verbose=False,  # Reduce console output
+            progress_callback=progress_callback
+        )
         
         progress_bar.close()
         
         # Calculate and display statistics
         end_time = time.time()
         process_time = end_time - start_time
-        speed_factor = duration / process_time
         
         print(f"\nStats:")
-        print(f"Audio duration: {duration:.1f} seconds")
         print(f"Process time: {process_time:.1f} seconds")
-        print(f"Speed factor: {speed_factor:.1f}x realtime")
         
         print("\nTranscription:")
         print(result["text"])
