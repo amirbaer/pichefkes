@@ -1,0 +1,87 @@
+### REFERENCES
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+# User specific environment and startup programs
+
+if [ -f ~/.alias ]; then
+    for a in ~/.alias*; do source $a; done
+fi
+
+if [ -f ~/.git-completion.bash ]; then
+    . ~/.git-completion.bash
+fi
+
+
+### SYSTEM
+
+# amirbaer addition for mount ntfs with utf8 (4.3.14)
+export LC_ALL=en_US.UTF-8  
+export LANG=en_US.UTF-8
+
+
+#export PS1="\[$(tput bold)\]\[$(tput setaf 7)\][\[$(tput smul)\]\u\[$(tput rmul)\]@\h] \W > \[$(tput sgr0)\]"
+export PS1="\[$(tput bold)\]\[$(tput setaf 7)\][\[$(tput smul)\]\u\[$(tput rmul)\]@$(networksetup getcomputername)] \W > \[$(tput sgr0)\]"
+
+# silence OS X Catalina (10.15) zsh message
+export BASH_SILENCE_DEPRECATION_WARNING=1
+
+
+### HISTORY
+
+# Undocumented feature which sets the size to "unlimited".
+# http://stackoverflow.com/questions/9457233/unlimited-bash-history
+export HISTFILESIZE=
+export HISTSIZE=
+export HISTTIMEFORMAT="[%F %T] "
+
+# Change the file location because certain bash sessions truncate .bash_history file upon close.
+# http://superuser.com/questions/575479/bash-history-truncated-to-500-lines-on-each-login
+export HISTFILE=~/.bash_eternal_history
+
+# Make history be appended + saved after every command
+shopt -s histappend
+PROMPT_COMMAND="history -a;$PROMPT_COMMAND"
+
+
+### APPS
+
+export PATH="/usr/local/heroku/bin:$PATH" # Heroku
+export PATH="/Users/amirbaer/.local/bin:$PATH" # poetry
+
+# Added for AWS-CLI
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+
+# NVM
+export NVM_DIR="$HOME/.nvm"
+  [ -s "/usr/local/opt/nvm/nvm.sh" ] && . "/usr/local/opt/nvm/nvm.sh"  # This loads nvm
+  [ -s "/usr/local/opt/nvm/etc/bash_completion.d/nvm" ] && . "/usr/local/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
+
+# Homebrew
+if [ -f '/opt/homebrew/bin/brew' ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)";
+fi
+
+# Google Cloud
+if [ -d '/usr/local/Caskroom/google-cloud-sdk/latest/google-cloud-sdk' ]; then
+  source "/usr/local/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/path.bash.inc"
+  source "/usr/local/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.bash.inc"
+fi
+
+if [ -d '/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk' ]; then
+  source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/path.bash.inc"
+  source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.bash.inc"
+fi
+
+# Go
+if [ -d "$HOME/go/bin" ]; then
+  export PATH="$HOME/go/bin:$PATH"
+fi
+
+
+
+export PATH=/Users/amirbaer/.groundcover/bin:${PATH}
