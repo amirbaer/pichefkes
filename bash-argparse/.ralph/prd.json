@@ -65,7 +65,7 @@
       "id": "009",
       "title": "Implement type validation (int)",
       "description": "Add -t/--type option to add_argument supporting 'int' type. Validate during parse that value is numeric. Print error if validation fails.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["008"]
     },
     {

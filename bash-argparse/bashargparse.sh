@@ -118,6 +118,7 @@ argparse_init() {
 #   -h, --help TEXT      Help text for this argument
 #   -d, --default VALUE  Default value
 #   -r, --required       Mark argument as required
+#   -t, --type TYPE      Type validation: string (default), int
 #   -a, --action ACTION  Action: store (default), store_true
 #
 # For boolean flags (store_true):
@@ -126,6 +127,9 @@ argparse_init() {
 # For value flags (store):
 #   add_argument -s o -l output -d '/tmp/out' -h 'Output file'
 #   add_argument -l config -r -h 'Config file path (required)'
+#
+# For integer arguments:
+#   add_argument -l port -t int -d '8080' -h 'Port number'
 #
 # For positional arguments:
 #   add_argument -p filename -h 'Input file to process'
@@ -139,6 +143,7 @@ add_argument() {
     local default=""
     local default_was_set=0
     local required=0
+    local type="string"
     local action=""
     local dest=""
 
@@ -170,6 +175,10 @@ add_argument() {
                 required=1
                 shift 1
                 ;;
+            -t|--type)
+                type="$2"
+                shift 2
+                ;;
             -a|--action)
                 action="$2"
                 shift 2
@@ -180,6 +189,12 @@ add_argument() {
                 ;;
         esac
     done
+
+    # Validate type option
+    if [[ "$type" != "string" && "$type" != "int" ]]; then
+        echo "add_argument: invalid type '$type' (must be 'string' or 'int')" >&2
+        return 1
+    fi
 
     # Validate: for positional args, only positional should be set
     # For flags, at least short or long must be provided
@@ -200,6 +215,12 @@ add_argument() {
             echo "add_argument: must provide at least -s/--short, -l/--long, or -p/--positional" >&2
             return 1
         fi
+    fi
+
+    # Validate: type validation doesn't make sense for store_true
+    if [[ "$type" == "int" && "$action" == "store_true" ]]; then
+        echo "add_argument: type 'int' cannot be used with 'store_true' action" >&2
+        return 1
     fi
 
     # Determine action if not explicitly set
@@ -240,7 +261,7 @@ add_argument() {
     _ARGPARSE_HELP[$idx]="$help"
     _ARGPARSE_DEFAULT[$idx]="$default"
     _ARGPARSE_REQUIRED[$idx]="$required"
-    _ARGPARSE_TYPE[$idx]="string"
+    _ARGPARSE_TYPE[$idx]="$type"
     _ARGPARSE_CHOICES[$idx]=""
     _ARGPARSE_ACTION[$idx]="$action"
     _ARGPARSE_NARGS[$idx]=""
@@ -253,6 +274,15 @@ add_argument() {
 
     # Increment argument count
     _ARGPARSE_ARG_COUNT=$((_ARGPARSE_ARG_COUNT + 1))
+}
+
+# Validate that a value is an integer
+# Usage: _argparse_is_int value
+# Returns: 0 if value is an integer, 1 otherwise
+_argparse_is_int() {
+    local value="$1"
+    # Match optional leading minus/plus sign followed by one or more digits
+    [[ "$value" =~ ^[+-]?[0-9]+$ ]]
 }
 
 # Print short usage line (for error messages)
@@ -457,7 +487,17 @@ argparse_parse() {
                                 echo "Error: $arg requires a value" >&2
                                 return 1
                             fi
-                            declare -g "ARG_${dest}=${args[$i]}"
+                            local value="${args[$i]}"
+                            # Type validation
+                            local arg_type="${_ARGPARSE_TYPE[$idx]}"
+                            if [[ "$arg_type" == "int" ]]; then
+                                if ! _argparse_is_int "$value"; then
+                                    _argparse_usage
+                                    echo "$_ARGPARSE_PROG: error: argument $arg: invalid int value: '$value'" >&2
+                                    return 1
+                                fi
+                            fi
+                            declare -g "ARG_${dest}=${value}"
                             ;;
                     esac
                     break
@@ -484,7 +524,18 @@ argparse_parse() {
     for ((p=0; p < pos_count && p < val_count; p++)); do
         local idx="${_ARGPARSE_POSITIONAL_ORDER[$p]}"
         local dest="${_ARGPARSE_DEST[$idx]}"
-        declare -g "ARG_${dest}=${positional_values[$p]}"
+        local value="${positional_values[$p]}"
+        local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
+        # Type validation for positional arguments
+        local arg_type="${_ARGPARSE_TYPE[$idx]}"
+        if [[ "$arg_type" == "int" ]]; then
+            if ! _argparse_is_int "$value"; then
+                _argparse_usage
+                echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid int value: '$value'" >&2
+                return 1
+            fi
+        fi
+        declare -g "ARG_${dest}=${value}"
         _arg_was_provided[$idx]=1
     done
 

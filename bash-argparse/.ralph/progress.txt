@@ -389,3 +389,53 @@ add_argument -p input -r -h 'Input file'
 
 ---
 
+## Task 009: Implement type validation (int)
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-t/--type` option to `add_argument()` function
+- Supports two type values: `string` (default) and `int`
+- Added `_argparse_is_int()` helper function that validates integer values
+  - Accepts positive integers, negative integers (with `-`), and positive sign integers (with `+`)
+  - Rejects floats, strings, and other non-integer values
+- Implemented type validation during parsing in `argparse_parse()`:
+  - Validates value flags when using `store` action
+  - Validates positional arguments
+- Error messages follow Python argparse style: "error: argument --flag: invalid int value: 'value'"
+- Added validation to prevent combining `int` type with `store_true` action (makes no sense)
+- Added validation to reject unknown type values (only `string` and `int` are allowed)
+
+### API
+```bash
+# Integer flags:
+add_argument -l port -t int -d '8080' -h 'Port number'
+add_argument -s n -l count -t int -r -h 'Count (required)'
+
+# Integer positional arguments:
+add_argument -p count -t int -h 'Number of items'
+
+# Validation errors look like:
+# usage: prog [options]
+# prog: error: argument --port: invalid int value: 'abc'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `-t/--type` option parsing, `_argparse_is_int()` helper, type validation in `argparse_parse()` (now ~560 lines)
+
+### Testing performed
+- Verified default int value works correctly
+- Verified explicit int values are accepted (positive, negative, zero, with +/- signs)
+- Verified invalid values (strings, floats) are rejected
+- Verified positional arguments with int type work
+- Verified short flags with int type work
+- Verified invalid type specification is rejected
+- Verified int type with store_true is rejected
+- Verified help output still works correctly
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
