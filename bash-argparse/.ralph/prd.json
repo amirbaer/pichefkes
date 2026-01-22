@@ -107,7 +107,7 @@
       "id": "015",
       "title": "Create README with usage examples",
       "description": "Create README.md with: quick start, installation, API reference, examples, and link to demo script. Focus on showing how simple it is to use.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["014"]
     }
   ],

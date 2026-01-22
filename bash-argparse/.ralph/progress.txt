@@ -730,3 +730,48 @@ add_argument -l levels -n '+' -c 'a,b,c' -h 'One or more levels from choices'
 
 ---
 
+## Task 015: Create README with usage examples
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Created comprehensive `README.md` documentation for bashargparse
+- Included all sections requested in the task:
+  - **Quick Start:** Minimal example showing library simplicity
+  - **Installation:** Two methods for sourcing the library
+  - **API Reference:** Complete documentation of all three public functions:
+    - `argparse_init` - parser initialization
+    - `add_argument` - full option table with all flags
+    - `argparse_parse` - parsing and result variables
+  - **Examples:** Code samples for all features:
+    - Boolean flags (store_true)
+    - Value flags with defaults
+    - Required arguments
+    - Integer type validation
+    - Choices validation
+    - Count action (-vvv)
+    - Multiple values (nargs)
+    - Positional arguments
+  - **Complete Example:** A realistic deployment script example
+  - **Limitations vs Python argparse:** Tables documenting:
+    - Features not supported
+    - Key differences from Python
+    - Bash-specific notes
+  - **Link to demo scripts:** Referenced examples/demo.sh and examples/simple.sh
+- Focused on demonstrating simplicity (per user directive in NOTES.md)
+- Used markdown tables for clear comparison with Python argparse
+
+### Files created/modified
+- **Created:** `README.md` - Comprehensive documentation (~250 lines)
+
+### Testing performed
+- Verified all code examples are syntactically correct
+- Verified all feature descriptions match the actual library implementation
+- Verified links to example scripts are correct
+- Verified markdown formatting renders correctly
+
+### Issues encountered
+- None
+
+---
+
