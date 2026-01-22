@@ -37,7 +37,7 @@
       "id": "005",
       "title": "Implement add_argument for positional arguments",
       "description": "Extend add_argument to support positional arguments (no dash prefix). Example: add_argument -p filename -h 'Input file to process'",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["004"]
     },
     {

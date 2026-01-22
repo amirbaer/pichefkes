@@ -114,6 +114,7 @@ argparse_init() {
 # Options:
 #   -s, --short FLAG     Short flag (without dash, e.g., 'v' for -v)
 #   -l, --long FLAG      Long flag (without dashes, e.g., 'verbose' for --verbose)
+#   -p, --positional NAME  Positional argument name (e.g., 'filename')
 #   -h, --help TEXT      Help text for this argument
 #   -d, --default VALUE  Default value
 #   -a, --action ACTION  Action: store (default), store_true
@@ -125,9 +126,14 @@ argparse_init() {
 #   add_argument -s o -l output -d '/tmp/out' -h 'Output file'
 #   add_argument -l config -h 'Config file path'
 #
+# For positional arguments:
+#   add_argument -p filename -h 'Input file to process'
+#   add_argument --positional output_dir --help 'Output directory'
+#
 add_argument() {
     local short=""
     local long=""
+    local positional=""
     local help=""
     local default=""
     local default_was_set=0
@@ -143,6 +149,10 @@ add_argument() {
                 ;;
             -l|--long)
                 long="$2"
+                shift 2
+                ;;
+            -p|--positional)
+                positional="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -165,23 +175,36 @@ add_argument() {
         esac
     done
 
-    # Validate: at least short or long must be provided
-    if [[ -z "$short" && -z "$long" ]]; then
-        echo "add_argument: must provide at least -s/--short or -l/--long" >&2
-        return 1
+    # Validate: for positional args, only positional should be set
+    # For flags, at least short or long must be provided
+    if [[ -n "$positional" ]]; then
+        # Positional argument mode
+        if [[ -n "$short" || -n "$long" ]]; then
+            echo "add_argument: positional arguments cannot have -s/--short or -l/--long flags" >&2
+            return 1
+        fi
+        # Positional arguments use 'store' action and cannot use store_true
+        if [[ "$action" == "store_true" ]]; then
+            echo "add_argument: positional arguments cannot use 'store_true' action" >&2
+            return 1
+        fi
+    else
+        # Flag mode - need at least short or long
+        if [[ -z "$short" && -z "$long" ]]; then
+            echo "add_argument: must provide at least -s/--short, -l/--long, or -p/--positional" >&2
+            return 1
+        fi
     fi
 
     # Determine action if not explicitly set
-    # Default to 'store' (value flag) unless no default was given, in which case
-    # we check if this looks like a boolean flag (for backwards compatibility)
     if [[ -z "$action" ]]; then
         action="store"
     fi
 
     # Determine destination variable name
-    # Priority: explicit dest > long flag > short flag
-    if [[ -n "$dest" ]]; then
-        : # keep explicit dest
+    # Priority: positional name > long flag > short flag
+    if [[ -n "$positional" ]]; then
+        dest="$(_argparse_to_varname "$positional")"
     elif [[ -n "$long" ]]; then
         dest="$(_argparse_to_varname "$long")"
     else
@@ -207,7 +230,7 @@ add_argument() {
     local idx=$_ARGPARSE_ARG_COUNT
     _ARGPARSE_SHORT[$idx]="$short"
     _ARGPARSE_LONG[$idx]="$long"
-    _ARGPARSE_POSITIONAL[$idx]=""
+    _ARGPARSE_POSITIONAL[$idx]="$positional"
     _ARGPARSE_HELP[$idx]="$help"
     _ARGPARSE_DEFAULT[$idx]="$default"
     _ARGPARSE_REQUIRED[$idx]="0"
@@ -216,6 +239,11 @@ add_argument() {
     _ARGPARSE_ACTION[$idx]="$action"
     _ARGPARSE_NARGS[$idx]=""
     _ARGPARSE_DEST[$idx]="$dest"
+
+    # Track positional arguments in order for parsing
+    if [[ -n "$positional" ]]; then
+        _ARGPARSE_POSITIONAL_ORDER+=("$idx")
+    fi
 
     # Increment argument count
     ((_ARGPARSE_ARG_COUNT++))

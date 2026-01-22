@@ -162,3 +162,54 @@ add_argument -s v -l verbose -a store_true -h 'Enable verbose mode'
 
 ---
 
+## Task 005: Implement add_argument for positional arguments
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Extended `add_argument()` to support positional arguments via `-p/--positional` option
+- Positional arguments are defined without dash prefix in the parser
+- Added validation to prevent mixing positional with short/long flags
+- Added validation to prevent `store_true` action on positional arguments
+- Positional arguments tracked in `_ARGPARSE_POSITIONAL_ORDER` array for correct parsing order
+- Destination variable names follow same convention (uppercase, hyphens to underscores)
+- Support for default values on positional arguments
+
+### API
+```bash
+# For positional arguments:
+add_argument -p filename -h 'Input file to process'
+add_argument --positional output_dir --help 'Output directory'
+add_argument -p config -d 'default.conf' -h 'Config file with default'
+
+# Multiple positional arguments (order matters):
+add_argument -p source -h 'Source file'
+add_argument -p destination -h 'Destination file'
+
+# Mix with flags:
+add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+add_argument -p input -h 'Input file'
+add_argument -l output -d '/tmp/out' -h 'Output path'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Extended add_argument function to support `-p/--positional` option (now ~250 lines)
+
+### Testing performed
+- Verified basic positional argument creation works
+- Verified long-form option syntax (`--positional`) works
+- Verified multiple positional arguments are tracked in order
+- Verified mix of flags and positional arguments works correctly
+- Verified positional with default value works
+- Verified error when combining positional with short flag
+- Verified error when combining positional with long flag
+- Verified error when using store_true with positional
+- Verified error when no flag/positional specified
+- Verified underscores and hyphens in names convert correctly to variable names
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
