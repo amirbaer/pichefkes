@@ -93,7 +93,7 @@
       "id": "013",
       "title": "Create comprehensive demo script",
       "description": "Create examples/demo.sh that demonstrates all bashargparse features. Include comments explaining each feature. Show both simple and advanced usage patterns.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["012"]
     },
     {

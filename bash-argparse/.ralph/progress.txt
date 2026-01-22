@@ -633,3 +633,49 @@ add_argument -l levels -n '+' -c 'a,b,c' -h 'One or more levels from choices'
 
 ---
 
+## Task 013: Create comprehensive demo script
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Created `examples/` directory for demo scripts
+- Created `examples/demo.sh` - comprehensive demo showcasing all bashargparse features:
+  - Boolean flags (store_true): `-d/--debug`, `--dry-run`
+  - Count action: `-v/--verbose` (supports `-vvv`)
+  - Value flags with defaults: `-o/--output`, `--config`
+  - Integer type validation: `-p/--port`, `--retries`
+  - Choices validation: `-l/--level`, `--format`
+  - nargs for multiple values: `--files` (+), `--tags` (*), `--coords` (3)
+  - Positional arguments: `input`
+  - Detailed comments explaining each feature
+  - Example output showing all parsed values
+  - Example usage code (verbosity levels, dry-run checks, iterating nargs values)
+- Created `examples/simple.sh` - minimal example showing basic usage:
+  - Demonstrates how easy it is to use the library
+  - Boolean flag, value flag with default, positional argument
+  - Shows automatic help generation
+
+### Files created/modified
+- **Created:** `examples/demo.sh` - Comprehensive demo script (~180 lines)
+- **Created:** `examples/simple.sh` - Simple usage example (~40 lines)
+- **Modified:** `bashargparse.sh` - Fixed `set -u` compatibility (line 12: use `${_BASHARGPARSE_LOADED:-}`)
+- **Modified:** `bashargparse.sh` - Updated shebang to `#!/usr/bin/env bash` with bash 4.2+ note
+
+### Testing performed
+- Verified `--help` displays nicely formatted help with all features
+- Verified basic usage with positional argument
+- Verified verbose count flag works (`-vvv` = 3)
+- Verified boolean flags (debug, dry-run)
+- Verified value flags with defaults
+- Verified integer type validation (accepts valid, rejects invalid)
+- Verified choices validation (accepts valid, rejects invalid)
+- Verified nargs with multiple values
+- Verified simple.sh example works correctly
+- All tests pass with both bash 5.x (homebrew) and fail gracefully with bash 3.x (macOS default)
+
+### Issues encountered
+- **`set -u` compatibility:** The library's multiple-sourcing check used `$_BASHARGPARSE_LOADED` which fails with `set -u`. Fixed by using `${_BASHARGPARSE_LOADED:-}`.
+- **Bash version:** `declare -g` requires bash 4.2+. macOS ships with bash 3.2. Updated shebangs to `#!/usr/bin/env bash` to use newer bash if available, added notes about bash version requirement.
+
+---
+

@@ -1,5 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # bashargparse - A simple bash implementation of Python's argparse
+# NOTE: Requires bash 4.2+ for declare -g support.
 #
 # Usage: source bashargparse.sh
 #
@@ -9,7 +10,7 @@
 #   argparse_parse    - Parse command line arguments
 
 # Prevent multiple sourcing
-[[ -n "$_BASHARGPARSE_LOADED" ]] && return 0
+[[ -n "${_BASHARGPARSE_LOADED:-}" ]] && return 0
 _BASHARGPARSE_LOADED=1
 
 # Version
