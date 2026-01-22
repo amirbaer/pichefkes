@@ -1,0 +1,136 @@
+{
+  "id": "001",
+  "title": "bashargparse - Bash Implementation of argparse",
+  "created": "2026-01-22",
+  "status": "active",
+  "description": "Create a bash implementation of Python's argparse library with focus on simplicity and 80/20 core features. Must be easy to import and use.",
+  "stories": [
+    {
+      "id": "001",
+      "title": "Create core library structure with simple sourcing",
+      "description": "Create bashargparse.sh as the main library file. Must be sourceable with a single 'source bashargparse.sh' command. Set up internal state variables for storing argument definitions.",
+      "status": "open",
+      "dependencies": []
+    },
+    {
+      "id": "002",
+      "title": "Implement argparse_init function",
+      "description": "Create argparse_init() that initializes the parser with optional program name and description. Should be called once at the start. Example: argparse_init 'myprogram' 'Description of my program'",
+      "status": "open",
+      "dependencies": ["001"]
+    },
+    {
+      "id": "003",
+      "title": "Implement add_argument for boolean flags",
+      "description": "Implement add_argument for simple boolean flags (store_true). Support both short (-v) and long (--verbose) forms. Example: add_argument -s v -l verbose -h 'Enable verbose mode'",
+      "status": "open",
+      "dependencies": ["002"]
+    },
+    {
+      "id": "004",
+      "title": "Implement add_argument for value flags",
+      "description": "Extend add_argument to support flags that take values. Support default values. Example: add_argument -s o -l output -d '/tmp/out' -h 'Output file'",
+      "status": "open",
+      "dependencies": ["003"]
+    },
+    {
+      "id": "005",
+      "title": "Implement add_argument for positional arguments",
+      "description": "Extend add_argument to support positional arguments (no dash prefix). Example: add_argument -p filename -h 'Input file to process'",
+      "status": "open",
+      "dependencies": ["004"]
+    },
+    {
+      "id": "006",
+      "title": "Implement argparse_parse function",
+      "description": "Create argparse_parse() that parses $@ and populates result variables. Should handle: boolean flags, value flags, positional args, unknown args. Create accessible variables like $ARG_VERBOSE, $ARG_OUTPUT, etc.",
+      "status": "open",
+      "dependencies": ["005"]
+    },
+    {
+      "id": "007",
+      "title": "Implement automatic --help generation",
+      "description": "Auto-generate --help / -h that displays program name, description, and all arguments with their help text in a nicely formatted way. Exit after displaying help.",
+      "status": "open",
+      "dependencies": ["006"]
+    },
+    {
+      "id": "008",
+      "title": "Implement required flag validation",
+      "description": "Add -r/--required option to add_argument. During parse, validate that required arguments are provided. Print error and usage if missing.",
+      "status": "open",
+      "dependencies": ["007"]
+    },
+    {
+      "id": "009",
+      "title": "Implement type validation (int)",
+      "description": "Add -t/--type option to add_argument supporting 'int' type. Validate during parse that value is numeric. Print error if validation fails.",
+      "status": "open",
+      "dependencies": ["008"]
+    },
+    {
+      "id": "010",
+      "title": "Implement choices validation",
+      "description": "Add -c/--choices option to add_argument. Validate during parse that value is one of the allowed choices. Example: add_argument -l level -c 'debug,info,warn,error'",
+      "status": "open",
+      "dependencies": ["009"]
+    },
+    {
+      "id": "011",
+      "title": "Implement count action for flags",
+      "description": "Add support for count action where flag can be repeated (-vvv = 3). Add -a/--action option to add_argument with 'count' value.",
+      "status": "open",
+      "dependencies": ["010"]
+    },
+    {
+      "id": "012",
+      "title": "Implement nargs for multiple values",
+      "description": "Add -n/--nargs option supporting '+' (one or more), '*' (zero or more), and numbers. Store results as space-separated string or array.",
+      "status": "open",
+      "dependencies": ["011"]
+    },
+    {
+      "id": "013",
+      "title": "Create comprehensive demo script",
+      "description": "Create examples/demo.sh that demonstrates all bashargparse features. Include comments explaining each feature. Show both simple and advanced usage patterns.",
+      "status": "open",
+      "dependencies": ["012"]
+    },
+    {
+      "id": "014",
+      "title": "Document limitations vs Python argparse",
+      "description": "Add a LIMITATIONS section to the demo script output that clearly lists what's different/missing compared to Python argparse (subcommands, argument groups, mutually exclusive groups, etc.)",
+      "status": "open",
+      "dependencies": ["013"]
+    },
+    {
+      "id": "015",
+      "title": "Create README with usage examples",
+      "description": "Create README.md with: quick start, installation, API reference, examples, and link to demo script. Focus on showing how simple it is to use.",
+      "status": "open",
+      "dependencies": ["014"]
+    }
+  ],
+  "metadata": {
+    "total_tasks": 15,
+    "priority_features": [
+      "Simple sourcing/import",
+      "Boolean flags (-v, --verbose)",
+      "Value flags with defaults",
+      "Positional arguments",
+      "Auto-generated help",
+      "Required validation",
+      "Type validation (int)",
+      "Choices validation",
+      "Count action (-vvv)",
+      "nargs for multiple values"
+    ],
+    "deferred_features": [
+      "Subcommands/subparsers",
+      "Argument groups",
+      "Mutually exclusive groups",
+      "Environment variable defaults",
+      "Config file integration"
+    ]
+  }
+}
