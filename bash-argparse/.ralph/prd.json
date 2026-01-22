@@ -9,7 +9,7 @@
       "id": "001",
       "title": "Create core library structure with simple sourcing",
       "description": "Create bashargparse.sh as the main library file. Must be sourceable with a single 'source bashargparse.sh' command. Set up internal state variables for storing argument definitions.",
-      "status": "open",
+      "status": "completed",
       "dependencies": []
     },
     {
