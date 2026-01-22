@@ -32,3 +32,39 @@ _This file is automatically updated after each Ralph iteration._
 
 ---
 
+## Task 002: Implement argparse_init function
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `argparse_init()` function in bashargparse.sh
+- Function accepts optional program name and description arguments
+- Program name defaults to script name (`basename ${BASH_SOURCE[-1]}`) if not provided
+- Description defaults to empty string if not provided
+- Re-initialization properly resets all internal state via `_argparse_reset()`
+
+### API
+```bash
+argparse_init [program_name] [description]
+
+# Examples:
+argparse_init 'myprogram' 'A tool for processing files'
+argparse_init 'mytool'  # description will be empty
+argparse_init           # uses script name, empty description
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added argparse_init function (now ~100 lines)
+
+### Testing performed
+- Verified argparse_init with both arguments sets them correctly
+- Verified argparse_init with only program name works
+- Verified argparse_init with no arguments defaults to script name
+- Verified re-initialization resets state (arg count returns to 0)
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+

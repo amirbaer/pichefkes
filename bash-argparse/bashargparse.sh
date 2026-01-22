@@ -75,3 +75,35 @@ _argparse_reset() {
 
 # Initialize state on first load
 _argparse_reset
+
+# =============================================================================
+# Public API Functions
+# =============================================================================
+
+# Initialize the argument parser
+# Usage: argparse_init [program_name] [description]
+#
+# Arguments:
+#   program_name  - Name of the program (default: script name)
+#   description   - Description shown in help (default: empty)
+#
+# Example:
+#   argparse_init 'myprogram' 'A tool for processing files'
+#
+argparse_init() {
+    local prog="${1:-}"
+    local desc="${2:-}"
+
+    # Reset all state to allow re-initialization
+    _argparse_reset
+
+    # Set program name (default to script name if not provided)
+    if [[ -n "$prog" ]]; then
+        _ARGPARSE_PROG="$prog"
+    else
+        _ARGPARSE_PROG="$(basename "${BASH_SOURCE[-1]:-$0}")"
+    fi
+
+    # Set description
+    _ARGPARSE_DESCRIPTION="$desc"
+}
