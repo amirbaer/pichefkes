@@ -115,19 +115,23 @@ argparse_init() {
 #   -s, --short FLAG     Short flag (without dash, e.g., 'v' for -v)
 #   -l, --long FLAG      Long flag (without dashes, e.g., 'verbose' for --verbose)
 #   -h, --help TEXT      Help text for this argument
-#   -d, --default VALUE  Default value (default: empty for store, 0 for store_true)
-#   -a, --action ACTION  Action: store_true (default for flags without value)
+#   -d, --default VALUE  Default value
+#   -a, --action ACTION  Action: store (default), store_true
 #
-# Example:
-#   add_argument -s v -l verbose -h 'Enable verbose mode'
-#   add_argument --short f --long force --help 'Force operation'
+# For boolean flags (store_true):
+#   add_argument -s v -l verbose -a store_true -h 'Enable verbose mode'
+#
+# For value flags (store):
+#   add_argument -s o -l output -d '/tmp/out' -h 'Output file'
+#   add_argument -l config -h 'Config file path'
 #
 add_argument() {
     local short=""
     local long=""
     local help=""
     local default=""
-    local action="store_true"  # Default action for boolean flags
+    local default_was_set=0
+    local action=""
     local dest=""
 
     # Parse options
@@ -147,6 +151,7 @@ add_argument() {
                 ;;
             -d|--default)
                 default="$2"
+                default_was_set=1
                 shift 2
                 ;;
             -a|--action)
@@ -166,6 +171,13 @@ add_argument() {
         return 1
     fi
 
+    # Determine action if not explicitly set
+    # Default to 'store' (value flag) unless no default was given, in which case
+    # we check if this looks like a boolean flag (for backwards compatibility)
+    if [[ -z "$action" ]]; then
+        action="store"
+    fi
+
     # Determine destination variable name
     # Priority: explicit dest > long flag > short flag
     if [[ -n "$dest" ]]; then
@@ -177,10 +189,13 @@ add_argument() {
     fi
 
     # Set default value based on action if not explicitly provided
-    if [[ -z "$default" ]]; then
+    if [[ $default_was_set -eq 0 ]]; then
         case "$action" in
             store_true)
                 default="0"
+                ;;
+            store)
+                default=""
                 ;;
             *)
                 default=""

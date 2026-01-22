@@ -30,7 +30,7 @@
       "id": "004",
       "title": "Implement add_argument for value flags",
       "description": "Extend add_argument to support flags that take values. Support default values. Example: add_argument -s o -l output -d '/tmp/out' -h 'Output file'",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["003"]
     },
     {

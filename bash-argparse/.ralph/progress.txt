@@ -121,3 +121,44 @@ add_argument -s q -h 'Quiet mode'
 
 ---
 
+## Task 004: Implement add_argument for value flags
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Extended `add_argument()` to support flags that take values via the `store` action
+- Changed default action from `store_true` to `store` (value flags are the default now)
+- Boolean flags now require explicit `-a store_true` to be set
+- Added tracking for whether default was explicitly set (`default_was_set` flag)
+- Default behavior:
+  - `store` action: default is empty string (unless explicitly provided via `-d`)
+  - `store_true` action: default is `0`
+
+### API
+```bash
+# For value flags (store action - now the default):
+add_argument -s o -l output -d '/tmp/out' -h 'Output file'
+add_argument -l config -h 'Config file path'  # default is empty
+add_argument --long port --default "8080" --help "Port number"
+
+# For boolean flags (store_true action - explicit):
+add_argument -s v -l verbose -a store_true -h 'Enable verbose mode'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Extended add_argument function (now ~215 lines)
+
+### Testing performed
+- Verified value flag with default sets correct values (`DEFAULT: /tmp/out`, `ACTION: store`)
+- Verified value flag without default has empty string default
+- Verified boolean flag with `store_true` still works (default: 0)
+- Verified multiple argument types can coexist
+- Verified long-form option syntax works (`--default`, `--help`, etc.)
+- Verified explicit empty default works correctly
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
