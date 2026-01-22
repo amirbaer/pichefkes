@@ -487,3 +487,61 @@ add_argument -p action -c 'start,stop,restart' -h 'Action to perform'
 
 ---
 
+## Task 011: Implement count action for flags
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `count` action to `add_argument()` function
+- Implemented counter increment in `argparse_parse()` for each flag occurrence
+- Added support for combined short flags like `-vvv` (counts as 3)
+- Default value for count action is `0` (before any flags seen)
+- Combined flags work by detecting repeated identical characters after `-`
+- Help output shows count flags without VALUE placeholder (like store_true)
+- Added validation to prevent combining count action with:
+  - `type=int` (count action doesn't take values)
+  - `choices` validation (count action doesn't take values)
+
+### API
+```bash
+# Count action - flag can be repeated:
+add_argument -s v -l verbose -a count -h 'Verbosity level'
+
+# Usage examples:
+# prog -v              → ARG_VERBOSE=1
+# prog -v -v -v        → ARG_VERBOSE=3
+# prog -vvv            → ARG_VERBOSE=3 (combined form)
+# prog -vvv -v         → ARG_VERBOSE=4 (mixed)
+# prog --verbose       → ARG_VERBOSE=1
+# prog -vv --verbose   → ARG_VERBOSE=3
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added count action support (~670 lines)
+  - Updated add_argument documentation and validation
+  - Added count action handling in argparse_parse
+  - Added combined short flag expansion (-vvv)
+
+### Testing performed
+- Verified separate flags increment counter (-v -v -v = 3)
+- Verified combined short flags work (-vvv = 3)
+- Verified long flags increment counter (--verbose --verbose = 2)
+- Verified mixed flags work correctly (-v --verbose -v = 3)
+- Verified default is 0 when no flags provided
+- Verified combined plus single flags work (-vvv -v = 4)
+- Verified count with only short flag defined
+- Verified count with only long flag defined
+- Verified help output shows flags without VALUE
+- Verified type=int with count is rejected
+- Verified choices with count is rejected
+- Verified count works alongside other flag types (store, store_true)
+- Verified combined store_true flags work (-fff just sets to 1)
+- All regression tests pass (existing functionality intact)
+- Verified bash syntax check passes
+
+### Issues encountered
+- Initial regex pattern using backreference (`\1`) doesn't work in bash regex
+- Fixed by using explicit character comparison loop to detect repeated characters
+
+---
+

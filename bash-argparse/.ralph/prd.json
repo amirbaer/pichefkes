@@ -79,7 +79,7 @@
       "id": "011",
       "title": "Implement count action for flags",
       "description": "Add support for count action where flag can be repeated (-vvv = 3). Add -a/--action option to add_argument with 'count' value.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["010"]
     },
     {

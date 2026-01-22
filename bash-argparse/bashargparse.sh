@@ -120,7 +120,7 @@ argparse_init() {
 #   -r, --required       Mark argument as required
 #   -t, --type TYPE      Type validation: string (default), int
 #   -c, --choices LIST   Comma-separated list of valid choices
-#   -a, --action ACTION  Action: store (default), store_true
+#   -a, --action ACTION  Action: store (default), store_true, count
 #
 # For boolean flags (store_true):
 #   add_argument -s v -l verbose -a store_true -h 'Enable verbose mode'
@@ -134,6 +134,9 @@ argparse_init() {
 #
 # For choices validation:
 #   add_argument -l level -c 'debug,info,warn,error' -h 'Log level'
+#
+# For count action (flag can be repeated: -vvv = 3):
+#   add_argument -s v -l verbose -a count -h 'Verbosity level'
 #
 # For positional arguments:
 #   add_argument -p filename -h 'Input file to process'
@@ -226,15 +229,15 @@ add_argument() {
         fi
     fi
 
-    # Validate: type validation doesn't make sense for store_true
-    if [[ "$type" == "int" && "$action" == "store_true" ]]; then
-        echo "add_argument: type 'int' cannot be used with 'store_true' action" >&2
+    # Validate: type validation doesn't make sense for store_true or count
+    if [[ "$type" == "int" && ( "$action" == "store_true" || "$action" == "count" ) ]]; then
+        echo "add_argument: type 'int' cannot be used with '$action' action" >&2
         return 1
     fi
 
-    # Validate: choices validation doesn't make sense for store_true
-    if [[ -n "$choices" && "$action" == "store_true" ]]; then
-        echo "add_argument: choices cannot be used with 'store_true' action" >&2
+    # Validate: choices validation doesn't make sense for store_true or count
+    if [[ -n "$choices" && ( "$action" == "store_true" || "$action" == "count" ) ]]; then
+        echo "add_argument: choices cannot be used with '$action' action" >&2
         return 1
     fi
 
@@ -257,6 +260,9 @@ add_argument() {
     if [[ $default_was_set -eq 0 ]]; then
         case "$action" in
             store_true)
+                default="0"
+                ;;
+            count)
                 default="0"
                 ;;
             store)
@@ -490,6 +496,58 @@ argparse_parse() {
 
         # Check if it's a flag (starts with -)
         if [[ "$arg" == -* ]]; then
+            # Handle combined short flags like -vvv (multiple same flags combined)
+            # This only applies to single-dash flags with more than one character after the dash
+            # and only if all characters are the same (e.g., -vvv but not -vxy)
+            if [[ "$arg" =~ ^-([a-zA-Z]+)$ && ${#arg} -gt 2 ]]; then
+                local flag_chars="${BASH_REMATCH[1]}"
+                local first_char="${flag_chars:0:1}"
+                local all_same=1
+                local char_count=${#flag_chars}
+
+                # Check if all characters are the same
+                for ((c=1; c < char_count; c++)); do
+                    if [[ "${flag_chars:$c:1}" != "$first_char" ]]; then
+                        all_same=0
+                        break
+                    fi
+                done
+
+                if [[ $all_same -eq 1 ]]; then
+                    # Find if this is a valid count or store_true flag
+                    local found_idx=-1
+                    for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
+                        local short="${_ARGPARSE_SHORT[$idx]}"
+                        if [[ "$short" == "$first_char" ]]; then
+                            local action="${_ARGPARSE_ACTION[$idx]}"
+                            if [[ "$action" == "count" || "$action" == "store_true" ]]; then
+                                found_idx=$idx
+                                break
+                            fi
+                        fi
+                    done
+
+                    if [[ $found_idx -ge 0 ]]; then
+                        local action="${_ARGPARSE_ACTION[$found_idx]}"
+                        local dest="${_ARGPARSE_DEST[$found_idx]}"
+                        _arg_was_provided[$found_idx]=1
+
+                        if [[ "$action" == "count" ]]; then
+                            # Add the count
+                            local current_val
+                            eval "current_val=\$ARG_${dest}"
+                            declare -g "ARG_${dest}=$((current_val + char_count))"
+                        else
+                            # store_true - just set to 1
+                            declare -g "ARG_${dest}=1"
+                        fi
+                        i=$((i + 1))
+                        continue
+                    fi
+                fi
+                # If not found or not a count/store_true flag, fall through to regular processing
+            fi
+
             # Try to match against defined flags
             for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
                 local short="${_ARGPARSE_SHORT[$idx]}"
@@ -518,6 +576,12 @@ argparse_parse() {
                         store_true)
                             # Set to 1
                             declare -g "ARG_${dest}=1"
+                            ;;
+                        count)
+                            # Increment the counter
+                            local current_val
+                            eval "current_val=\$ARG_${dest}"
+                            declare -g "ARG_${dest}=$((current_val + 1))"
                             ;;
                         store)
                             # Get the next argument as the value
