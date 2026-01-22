@@ -545,3 +545,91 @@ add_argument -s v -l verbose -a count -h 'Verbosity level'
 
 ---
 
+## Task 012: Implement nargs for multiple values
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-n/--nargs` option to `add_argument()` function
+- Supports three nargs values:
+  - `+` (one or more values, requires at least one)
+  - `*` (zero or more values, allows empty)
+  - Positive integers (e.g., `3` for exactly 3 values)
+- Implemented nargs handling for flags in `argparse_parse()`:
+  - Collects consecutive non-flag arguments for `+` and `*`
+  - Stops when hitting another flag (starts with `-`)
+  - Validates minimum one value for `+` nargs
+  - Validates exact count for numeric nargs
+- Implemented nargs handling for positional arguments:
+  - `+` and `*` consume all remaining positional values
+  - Numeric nargs consume exactly N values
+- Results stored as space-separated strings (e.g., `ARG_FILES='a.txt b.txt c.txt'`)
+- Updated help output:
+  - Shows `VALUE [VALUE...]` for nargs `+`
+  - Shows `[VALUE...]` for nargs `*`
+  - Shows multiple `VALUE` placeholders for numeric nargs
+  - Usage line shows `name [name...]` for positional with `+`, `[name...]` for `*`
+- Added validation:
+  - Invalid nargs values are rejected (must be `+`, `*`, or positive integer)
+  - nargs cannot be combined with `store_true` or `count` actions
+- Type validation (`int`) works with nargs - validates each value
+- Choices validation works with nargs - validates each value against choices
+
+### API
+```bash
+# Flags with nargs:
+add_argument -l files -n '+' -h 'One or more files'      # --files a b c
+add_argument -l items -n '*' -h 'Zero or more items'     # --items (optionally followed by values)
+add_argument -l coords -n 3 -h 'Exactly 3 coordinates'   # --coords x y z
+
+# Positional arguments with nargs:
+add_argument -p inputs -n '+' -h 'One or more input files'
+add_argument -p extras -n '*' -h 'Optional extra files'
+
+# With type/choices validation:
+add_argument -l numbers -n '+' -t int -h 'One or more integers'
+add_argument -l levels -n '+' -c 'a,b,c' -h 'One or more levels from choices'
+
+# Access results (space-separated string):
+# ARG_FILES='file1.txt file2.txt file3.txt'
+# ARG_COORDS='10 20 30'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added nargs support (~850 lines)
+  - Added `-n/--nargs` option parsing in `add_argument()`
+  - Added nargs validation (valid values, incompatible action combinations)
+  - Updated `argparse_parse()` to handle nargs for flags
+  - Updated `argparse_parse()` to handle nargs for positional arguments
+  - Updated `argparse_help()` to display nargs in help output
+  - Increased column width in help output from 20 to 28 for better nargs display
+
+### Testing performed
+- Verified nargs `+` for flags collects multiple values
+- Verified nargs `*` for flags collects values (including zero)
+- Verified nargs with exact number collects exactly N values
+- Verified nargs `+` for positional arguments
+- Verified nargs `*` for positional arguments (including empty)
+- Verified nargs with type validation (int)
+- Verified nargs with choices validation
+- Verified nargs `+` flag error when no values provided
+- Verified nargs with exact count error when not enough values
+- Verified invalid nargs values are rejected
+- Verified nargs with store_true is rejected
+- Verified nargs with count is rejected
+- Verified short flags with nargs work
+- Verified mixed flags and positional with nargs
+- Verified help output displays nargs correctly
+- Verified usage line shows nargs indicators
+- All regression tests pass (existing functionality intact)
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+### Notes
+- When using nargs `*` or `+` on flags, the flag consumes all following non-flag arguments until it hits another flag (starts with `-`). This means positional arguments should generally come before nargs flags, or nargs flags should be last on the command line.
+- Results are stored as space-separated strings. To iterate over values in bash, use: `for file in $ARG_FILES; do ... done`
+
+---
+

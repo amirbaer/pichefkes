@@ -86,7 +86,7 @@
       "id": "012",
       "title": "Implement nargs for multiple values",
       "description": "Add -n/--nargs option supporting '+' (one or more), '*' (zero or more), and numbers. Store results as space-separated string or array.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["011"]
     },
     {

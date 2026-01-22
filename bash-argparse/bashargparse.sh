@@ -121,6 +121,7 @@ argparse_init() {
 #   -t, --type TYPE      Type validation: string (default), int
 #   -c, --choices LIST   Comma-separated list of valid choices
 #   -a, --action ACTION  Action: store (default), store_true, count
+#   -n, --nargs VALUE    Number of args: + (one or more), * (zero or more), or a number
 #
 # For boolean flags (store_true):
 #   add_argument -s v -l verbose -a store_true -h 'Enable verbose mode'
@@ -138,6 +139,12 @@ argparse_init() {
 # For count action (flag can be repeated: -vvv = 3):
 #   add_argument -s v -l verbose -a count -h 'Verbosity level'
 #
+# For multiple values (nargs):
+#   add_argument -l files -n '+' -h 'One or more files'
+#   add_argument -l items -n '*' -h 'Zero or more items'
+#   add_argument -l coords -n 3 -h 'Exactly 3 coordinates'
+#   add_argument -p inputs -n '+' -h 'One or more input files'
+#
 # For positional arguments:
 #   add_argument -p filename -h 'Input file to process'
 #   add_argument --positional output_dir --help 'Output directory'
@@ -153,6 +160,7 @@ add_argument() {
     local type="string"
     local choices=""
     local action=""
+    local nargs=""
     local dest=""
 
     # Parse options
@@ -193,6 +201,10 @@ add_argument() {
                 ;;
             -a|--action)
                 action="$2"
+                shift 2
+                ;;
+            -n|--nargs)
+                nargs="$2"
                 shift 2
                 ;;
             *)
@@ -241,6 +253,23 @@ add_argument() {
         return 1
     fi
 
+    # Validate nargs option: must be +, *, or a positive integer
+    if [[ -n "$nargs" ]]; then
+        if [[ "$nargs" != "+" && "$nargs" != "*" ]]; then
+            # Must be a positive integer
+            if ! [[ "$nargs" =~ ^[1-9][0-9]*$ ]]; then
+                echo "add_argument: invalid nargs value '$nargs' (must be '+', '*', or a positive integer)" >&2
+                return 1
+            fi
+        fi
+    fi
+
+    # Validate: nargs doesn't make sense for store_true or count
+    if [[ -n "$nargs" && ( "$action" == "store_true" || "$action" == "count" ) ]]; then
+        echo "add_argument: nargs cannot be used with '$action' action" >&2
+        return 1
+    fi
+
     # Determine action if not explicitly set
     if [[ -z "$action" ]]; then
         action="store"
@@ -266,6 +295,7 @@ add_argument() {
                 default="0"
                 ;;
             store)
+                # For nargs, default is empty (will be space-separated list)
                 default=""
                 ;;
             *)
@@ -285,7 +315,7 @@ add_argument() {
     _ARGPARSE_TYPE[$idx]="$type"
     _ARGPARSE_CHOICES[$idx]="$choices"
     _ARGPARSE_ACTION[$idx]="$action"
-    _ARGPARSE_NARGS[$idx]=""
+    _ARGPARSE_NARGS[$idx]="$nargs"
     _ARGPARSE_DEST[$idx]="$dest"
 
     # Track positional arguments in order for parsing
@@ -353,7 +383,21 @@ argparse_help() {
     # Add positional arguments to usage
     for idx in "${_ARGPARSE_POSITIONAL_ORDER[@]}"; do
         local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
-        usage="$usage $pos_name"
+        local pos_nargs="${_ARGPARSE_NARGS[$idx]}"
+        local pos_required="${_ARGPARSE_REQUIRED[$idx]}"
+
+        if [[ "$pos_nargs" == "+" ]]; then
+            usage="$usage $pos_name [${pos_name}...]"
+        elif [[ "$pos_nargs" == "*" ]]; then
+            usage="$usage [${pos_name}...]"
+        elif [[ -n "$pos_nargs" ]]; then
+            # Specific number
+            for ((n=0; n < pos_nargs; n++)); do
+                usage="$usage $pos_name"
+            done
+        else
+            usage="$usage $pos_name"
+        fi
     done
 
     echo "$usage"
@@ -376,9 +420,9 @@ argparse_help() {
             local choices="${_ARGPARSE_CHOICES[$idx]}"
 
             # Format: "  name          help text"
-            printf "  %-20s" "$pos_name"
+            printf "  %-28s" "$pos_name"
             if [[ -n "$help_text" ]]; then
-                printf "%s" "$help_text"
+                printf " %s" "$help_text"
             fi
             # Show choices if defined
             if [[ -n "$choices" ]]; then
@@ -396,7 +440,7 @@ argparse_help() {
     # Print options section (always shown since -h/--help is always available)
     echo "options:"
     # Always show -h, --help first
-    printf "  %-20s%s\n" "-h, --help" "show this help message and exit"
+    printf "  %-28s %s\n" "-h, --help" "show this help message and exit"
 
     for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
         local short="${_ARGPARSE_SHORT[$idx]}"
@@ -405,38 +449,44 @@ argparse_help() {
         local default="${_ARGPARSE_DEFAULT[$idx]}"
         local action="${_ARGPARSE_ACTION[$idx]}"
         local choices="${_ARGPARSE_CHOICES[$idx]}"
+        local arg_nargs="${_ARGPARSE_NARGS[$idx]}"
 
         # Skip positional arguments
         if [[ -n "${_ARGPARSE_POSITIONAL[$idx]}" ]]; then
             continue
         fi
 
-        # Build the flag string
-        local flag_str=""
-        if [[ -n "$short" && -n "$long" ]]; then
-            if [[ "$action" == "store" ]]; then
-                flag_str="-$short, --$long VALUE"
+        # Build VALUE indicator based on nargs
+        local value_indicator=""
+        if [[ "$action" == "store" ]]; then
+            if [[ "$arg_nargs" == "+" ]]; then
+                value_indicator=" VALUE [VALUE...]"
+            elif [[ "$arg_nargs" == "*" ]]; then
+                value_indicator=" [VALUE...]"
+            elif [[ -n "$arg_nargs" ]]; then
+                # Specific number
+                for ((n=0; n < arg_nargs; n++)); do
+                    value_indicator="$value_indicator VALUE"
+                done
             else
-                flag_str="-$short, --$long"
-            fi
-        elif [[ -n "$short" ]]; then
-            if [[ "$action" == "store" ]]; then
-                flag_str="-$short VALUE"
-            else
-                flag_str="-$short"
-            fi
-        else
-            if [[ "$action" == "store" ]]; then
-                flag_str="--$long VALUE"
-            else
-                flag_str="--$long"
+                value_indicator=" VALUE"
             fi
         fi
 
+        # Build the flag string
+        local flag_str=""
+        if [[ -n "$short" && -n "$long" ]]; then
+            flag_str="-$short, --$long${value_indicator}"
+        elif [[ -n "$short" ]]; then
+            flag_str="-$short${value_indicator}"
+        else
+            flag_str="--$long${value_indicator}"
+        fi
+
         # Format output
-        printf "  %-20s" "$flag_str"
+        printf "  %-28s" "$flag_str"
         if [[ -n "$help_text" ]]; then
-            printf "%s" "$help_text"
+            printf " %s" "$help_text"
         fi
         # Show choices if defined
         if [[ -n "$choices" ]]; then
@@ -584,32 +634,101 @@ argparse_parse() {
                             declare -g "ARG_${dest}=$((current_val + 1))"
                             ;;
                         store)
-                            # Get the next argument as the value
-                            i=$((i + 1))
-                            if [[ $i -ge ${#args[@]} ]]; then
-                                echo "Error: $arg requires a value" >&2
-                                return 1
-                            fi
-                            local value="${args[$i]}"
-                            # Type validation
+                            local arg_nargs="${_ARGPARSE_NARGS[$idx]}"
                             local arg_type="${_ARGPARSE_TYPE[$idx]}"
-                            if [[ "$arg_type" == "int" ]]; then
-                                if ! _argparse_is_int "$value"; then
-                                    _argparse_usage
-                                    echo "$_ARGPARSE_PROG: error: argument $arg: invalid int value: '$value'" >&2
-                                    return 1
-                                fi
-                            fi
-                            # Choices validation
                             local arg_choices="${_ARGPARSE_CHOICES[$idx]}"
-                            if [[ -n "$arg_choices" ]]; then
-                                if ! _argparse_in_choices "$value" "$arg_choices"; then
-                                    _argparse_usage
-                                    echo "$_ARGPARSE_PROG: error: argument $arg: invalid choice: '$value' (choose from: $arg_choices)" >&2
-                                    return 1
+                            local collected_values=()
+                            local num_to_collect=1
+
+                            # Determine how many values to collect based on nargs
+                            if [[ -n "$arg_nargs" ]]; then
+                                if [[ "$arg_nargs" == "+" || "$arg_nargs" == "*" ]]; then
+                                    # Collect all following non-flag arguments
+                                    num_to_collect=-1  # Special value meaning "until next flag"
+                                else
+                                    # Specific number
+                                    num_to_collect="$arg_nargs"
                                 fi
                             fi
-                            declare -g "ARG_${dest}=${value}"
+
+                            if [[ $num_to_collect -eq -1 ]]; then
+                                # Collect values until next flag or end of args
+                                while [[ $((i + 1)) -lt ${#args[@]} ]]; do
+                                    local next_arg="${args[$((i + 1))]}"
+                                    # Stop if we hit a flag (starts with -)
+                                    if [[ "$next_arg" == -* ]]; then
+                                        break
+                                    fi
+                                    i=$((i + 1))
+                                    local value="${args[$i]}"
+                                    # Type validation
+                                    if [[ "$arg_type" == "int" ]]; then
+                                        if ! _argparse_is_int "$value"; then
+                                            _argparse_usage
+                                            echo "$_ARGPARSE_PROG: error: argument $arg: invalid int value: '$value'" >&2
+                                            return 1
+                                        fi
+                                    fi
+                                    # Choices validation
+                                    if [[ -n "$arg_choices" ]]; then
+                                        if ! _argparse_in_choices "$value" "$arg_choices"; then
+                                            _argparse_usage
+                                            echo "$_ARGPARSE_PROG: error: argument $arg: invalid choice: '$value' (choose from: $arg_choices)" >&2
+                                            return 1
+                                        fi
+                                    fi
+                                    collected_values+=("$value")
+                                done
+
+                                # Validate we got at least one for '+'
+                                if [[ "$arg_nargs" == "+" && ${#collected_values[@]} -eq 0 ]]; then
+                                    _argparse_usage
+                                    echo "$_ARGPARSE_PROG: error: argument $arg: expected at least one argument" >&2
+                                    return 1
+                                fi
+
+                                # Store as space-separated string
+                                declare -g "ARG_${dest}=${collected_values[*]}"
+                            else
+                                # Collect exactly num_to_collect values
+                                for ((n=0; n < num_to_collect; n++)); do
+                                    i=$((i + 1))
+                                    if [[ $i -ge ${#args[@]} ]]; then
+                                        if [[ $num_to_collect -eq 1 ]]; then
+                                            echo "Error: $arg requires a value" >&2
+                                        else
+                                            _argparse_usage
+                                            echo "$_ARGPARSE_PROG: error: argument $arg: expected $num_to_collect argument(s)" >&2
+                                        fi
+                                        return 1
+                                    fi
+                                    local value="${args[$i]}"
+                                    # Type validation
+                                    if [[ "$arg_type" == "int" ]]; then
+                                        if ! _argparse_is_int "$value"; then
+                                            _argparse_usage
+                                            echo "$_ARGPARSE_PROG: error: argument $arg: invalid int value: '$value'" >&2
+                                            return 1
+                                        fi
+                                    fi
+                                    # Choices validation
+                                    if [[ -n "$arg_choices" ]]; then
+                                        if ! _argparse_in_choices "$value" "$arg_choices"; then
+                                            _argparse_usage
+                                            echo "$_ARGPARSE_PROG: error: argument $arg: invalid choice: '$value' (choose from: $arg_choices)" >&2
+                                            return 1
+                                        fi
+                                    fi
+                                    collected_values+=("$value")
+                                done
+
+                                # Store result: single value for nargs=1, space-separated for others
+                                if [[ $num_to_collect -eq 1 ]]; then
+                                    declare -g "ARG_${dest}=${collected_values[0]}"
+                                else
+                                    declare -g "ARG_${dest}=${collected_values[*]}"
+                                fi
+                            fi
                             ;;
                     esac
                     break
@@ -630,34 +749,124 @@ argparse_parse() {
     done
 
     # Assign positional values to positional arguments in order
+    # This is complex because nargs can consume multiple values
     local pos_count=${#_ARGPARSE_POSITIONAL_ORDER[@]}
     local val_count=${#positional_values[@]}
+    local val_idx=0  # Current index into positional_values
 
-    for ((p=0; p < pos_count && p < val_count; p++)); do
+    for ((p=0; p < pos_count; p++)); do
         local idx="${_ARGPARSE_POSITIONAL_ORDER[$p]}"
         local dest="${_ARGPARSE_DEST[$idx]}"
-        local value="${positional_values[$p]}"
         local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
-        # Type validation for positional arguments
         local arg_type="${_ARGPARSE_TYPE[$idx]}"
-        if [[ "$arg_type" == "int" ]]; then
-            if ! _argparse_is_int "$value"; then
-                _argparse_usage
-                echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid int value: '$value'" >&2
-                return 1
-            fi
-        fi
-        # Choices validation for positional arguments
         local arg_choices="${_ARGPARSE_CHOICES[$idx]}"
-        if [[ -n "$arg_choices" ]]; then
-            if ! _argparse_in_choices "$value" "$arg_choices"; then
-                _argparse_usage
-                echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid choice: '$value' (choose from: $arg_choices)" >&2
-                return 1
+        local arg_nargs="${_ARGPARSE_NARGS[$idx]}"
+
+        if [[ -z "$arg_nargs" ]]; then
+            # Single value positional
+            if [[ $val_idx -lt $val_count ]]; then
+                local value="${positional_values[$val_idx]}"
+                # Type validation
+                if [[ "$arg_type" == "int" ]]; then
+                    if ! _argparse_is_int "$value"; then
+                        _argparse_usage
+                        echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid int value: '$value'" >&2
+                        return 1
+                    fi
+                fi
+                # Choices validation
+                if [[ -n "$arg_choices" ]]; then
+                    if ! _argparse_in_choices "$value" "$arg_choices"; then
+                        _argparse_usage
+                        echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid choice: '$value' (choose from: $arg_choices)" >&2
+                        return 1
+                    fi
+                fi
+                declare -g "ARG_${dest}=${value}"
+                _arg_was_provided[$idx]=1
+                val_idx=$((val_idx + 1))
+            fi
+        elif [[ "$arg_nargs" == "+" || "$arg_nargs" == "*" ]]; then
+            # Consume all remaining values
+            local collected_values=()
+            while [[ $val_idx -lt $val_count ]]; do
+                local value="${positional_values[$val_idx]}"
+                # Type validation
+                if [[ "$arg_type" == "int" ]]; then
+                    if ! _argparse_is_int "$value"; then
+                        _argparse_usage
+                        echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid int value: '$value'" >&2
+                        return 1
+                    fi
+                fi
+                # Choices validation
+                if [[ -n "$arg_choices" ]]; then
+                    if ! _argparse_in_choices "$value" "$arg_choices"; then
+                        _argparse_usage
+                        echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid choice: '$value' (choose from: $arg_choices)" >&2
+                        return 1
+                    fi
+                fi
+                collected_values+=("$value")
+                val_idx=$((val_idx + 1))
+            done
+
+            # Validate we got at least one for '+'
+            if [[ "$arg_nargs" == "+" && ${#collected_values[@]} -eq 0 ]]; then
+                # Will be caught by required validation if arg is required
+                :
+            else
+                _arg_was_provided[$idx]=1
+            fi
+
+            # For '+', require at least one if marked as provided
+            if [[ "$arg_nargs" == "+" && ${#collected_values[@]} -gt 0 ]]; then
+                _arg_was_provided[$idx]=1
+            elif [[ "$arg_nargs" == "*" ]]; then
+                # '*' is always considered provided (empty is valid)
+                _arg_was_provided[$idx]=1
+            fi
+
+            # Store as space-separated string
+            declare -g "ARG_${dest}=${collected_values[*]}"
+        else
+            # Specific number of values (nargs is a positive integer)
+            local num_to_collect="$arg_nargs"
+            local collected_values=()
+
+            for ((n=0; n < num_to_collect; n++)); do
+                if [[ $val_idx -ge $val_count ]]; then
+                    # Not enough values - will be handled by required check or is optional
+                    break
+                fi
+                local value="${positional_values[$val_idx]}"
+                # Type validation
+                if [[ "$arg_type" == "int" ]]; then
+                    if ! _argparse_is_int "$value"; then
+                        _argparse_usage
+                        echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid int value: '$value'" >&2
+                        return 1
+                    fi
+                fi
+                # Choices validation
+                if [[ -n "$arg_choices" ]]; then
+                    if ! _argparse_in_choices "$value" "$arg_choices"; then
+                        _argparse_usage
+                        echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid choice: '$value' (choose from: $arg_choices)" >&2
+                        return 1
+                    fi
+                fi
+                collected_values+=("$value")
+                val_idx=$((val_idx + 1))
+            done
+
+            # Only mark as provided if we got all the required values
+            if [[ ${#collected_values[@]} -eq $num_to_collect ]]; then
+                _arg_was_provided[$idx]=1
+                # Store as space-separated string
+                declare -g "ARG_${dest}=${collected_values[*]}"
             fi
         fi
-        declare -g "ARG_${dest}=${value}"
-        _arg_was_provided[$idx]=1
     done
 
     # Validate required arguments
