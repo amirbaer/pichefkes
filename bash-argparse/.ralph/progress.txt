@@ -274,3 +274,64 @@ argparse_parse "$@"
 
 ---
 
+## Task 007: Implement automatic --help generation
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `argparse_help()` function that generates nicely formatted help output
+- Auto-registered `-h` and `--help` flags that are handled automatically by `argparse_parse()`
+- Help display includes:
+  - Usage line with program name, `[options]` indicator, and positional arguments
+  - Program description (if provided)
+  - Positional arguments section with names, help text, and defaults
+  - Options section with all flags, showing `-h, --help` first
+  - Default values shown for `store` action arguments
+  - VALUE placeholder shown for flags that take values
+- After displaying help, the script exits with code 0
+- Help flags are processed before any other argument parsing
+
+### API
+```bash
+# Help is automatic - just define your arguments and call parse:
+argparse_init 'myprogram' 'A demo program'
+add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+add_argument -l output -d '/tmp/out' -h 'Output file'
+add_argument -p filename -h 'Input file'
+argparse_parse "$@"
+
+# Running with --help or -h shows:
+# usage: myprogram [options] filename
+#
+# A demo program
+#
+# positional arguments:
+#   filename            Input file
+#
+# options:
+#   -h, --help          show this help message and exit
+#   -v, --verbose       Verbose mode
+#   --output VALUE      Output file (default: /tmp/out)
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `argparse_help()` function and help flag handling in `argparse_parse()` (now ~460 lines)
+
+### Testing performed
+- Verified `--help` flag displays formatted help and exits
+- Verified `-h` short flag works identically
+- Verified help output includes usage line with program name and positional args
+- Verified help output shows description when provided
+- Verified positional arguments section displays correctly with help text and defaults
+- Verified options section always appears (since -h/--help is always available)
+- Verified user-defined flags appear after -h, --help in options section
+- Verified VALUE placeholder appears for store action flags
+- Verified default values are shown for store action flags
+- Verified normal argument parsing still works after help implementation
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+

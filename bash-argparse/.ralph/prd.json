@@ -51,7 +51,7 @@
       "id": "007",
       "title": "Implement automatic --help generation",
       "description": "Auto-generate --help / -h that displays program name, description, and all arguments with their help text in a nicely formatted way. Exit after displaying help.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["006"]
     },
     {

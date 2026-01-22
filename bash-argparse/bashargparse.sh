@@ -249,6 +249,110 @@ add_argument() {
     _ARGPARSE_ARG_COUNT=$((_ARGPARSE_ARG_COUNT + 1))
 }
 
+# Display help message and exit
+# Usage: argparse_help
+#
+# This function generates and prints a formatted help message based on
+# the parser configuration and all defined arguments.
+#
+argparse_help() {
+    local prog="$_ARGPARSE_PROG"
+    local desc="$_ARGPARSE_DESCRIPTION"
+
+    # Build usage line
+    local usage="usage: $prog"
+
+    # Always add [options] since -h/--help is always available
+    usage="$usage [options]"
+
+    # Add positional arguments to usage
+    for idx in "${_ARGPARSE_POSITIONAL_ORDER[@]}"; do
+        local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
+        usage="$usage $pos_name"
+    done
+
+    echo "$usage"
+    echo
+
+    # Print description if provided
+    if [[ -n "$desc" ]]; then
+        echo "$desc"
+        echo
+    fi
+
+    # Print positional arguments section
+    if [[ ${#_ARGPARSE_POSITIONAL_ORDER[@]} -gt 0 ]]; then
+        echo "positional arguments:"
+        for idx in "${_ARGPARSE_POSITIONAL_ORDER[@]}"; do
+            local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
+            local help_text="${_ARGPARSE_HELP[$idx]}"
+            local default="${_ARGPARSE_DEFAULT[$idx]}"
+
+            # Format: "  name          help text"
+            printf "  %-20s" "$pos_name"
+            if [[ -n "$help_text" ]]; then
+                printf "%s" "$help_text"
+            fi
+            if [[ -n "$default" ]]; then
+                printf " (default: %s)" "$default"
+            fi
+            echo
+        done
+        echo
+    fi
+
+    # Print options section (always shown since -h/--help is always available)
+    echo "options:"
+    # Always show -h, --help first
+    printf "  %-20s%s\n" "-h, --help" "show this help message and exit"
+
+    for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
+        local short="${_ARGPARSE_SHORT[$idx]}"
+        local long="${_ARGPARSE_LONG[$idx]}"
+        local help_text="${_ARGPARSE_HELP[$idx]}"
+        local default="${_ARGPARSE_DEFAULT[$idx]}"
+        local action="${_ARGPARSE_ACTION[$idx]}"
+
+        # Skip positional arguments
+        if [[ -n "${_ARGPARSE_POSITIONAL[$idx]}" ]]; then
+            continue
+        fi
+
+        # Build the flag string
+        local flag_str=""
+        if [[ -n "$short" && -n "$long" ]]; then
+            if [[ "$action" == "store" ]]; then
+                flag_str="-$short, --$long VALUE"
+            else
+                flag_str="-$short, --$long"
+            fi
+        elif [[ -n "$short" ]]; then
+            if [[ "$action" == "store" ]]; then
+                flag_str="-$short VALUE"
+            else
+                flag_str="-$short"
+            fi
+        else
+            if [[ "$action" == "store" ]]; then
+                flag_str="--$long VALUE"
+            else
+                flag_str="--$long"
+            fi
+        fi
+
+        # Format output
+        printf "  %-20s" "$flag_str"
+        if [[ -n "$help_text" ]]; then
+            printf "%s" "$help_text"
+        fi
+        # Show default for store actions (not for store_true where default is always 0)
+        if [[ "$action" == "store" && -n "$default" ]]; then
+            printf " (default: %s)" "$default"
+        fi
+        echo
+    done
+}
+
 # Parse command line arguments
 # Usage: argparse_parse "$@"
 #
@@ -267,6 +371,14 @@ argparse_parse() {
     local -a args=("$@")
     local -a positional_values=()
     local i=0
+
+    # Check for help flags first (before any other processing)
+    for arg in "${args[@]}"; do
+        if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+            argparse_help
+            exit 0
+        fi
+    done
 
     # Initialize all arguments with their default values
     for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
