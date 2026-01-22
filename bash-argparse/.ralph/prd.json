@@ -23,7 +23,7 @@
       "id": "003",
       "title": "Implement add_argument for boolean flags",
       "description": "Implement add_argument for simple boolean flags (store_true). Support both short (-v) and long (--verbose) forms. Example: add_argument -s v -l verbose -h 'Enable verbose mode'",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["002"]
     },
     {

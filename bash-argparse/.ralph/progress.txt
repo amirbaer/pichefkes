@@ -68,3 +68,56 @@ argparse_init           # uses script name, empty description
 
 ---
 
+## Task 003: Implement add_argument for boolean flags
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `add_argument()` function in bashargparse.sh
+- Supports boolean flags with `store_true` action (default action)
+- Supports both short (`-s v`) and long (`-l verbose`) flag definitions
+- Supports help text via `-h` or `--help` option
+- Automatically generates destination variable name from flag name
+  - Long flag has priority over short flag for naming
+  - Converts to uppercase and replaces hyphens with underscores
+  - Example: `--dry-run` → `DRY_RUN`
+- Default value for `store_true` is `0` (will be `1` when flag is present)
+- Validates that at least short or long flag is provided
+- Stores argument definitions in parallel arrays for later parsing
+
+### API
+```bash
+add_argument [options]
+
+Options:
+  -s, --short FLAG     Short flag (without dash, e.g., 'v' for -v)
+  -l, --long FLAG      Long flag (without dashes, e.g., 'verbose' for --verbose)
+  -h, --help TEXT      Help text for this argument
+  -d, --default VALUE  Default value (default: 0 for store_true)
+  -a, --action ACTION  Action: store_true (default for boolean flags)
+
+# Examples:
+add_argument -s v -l verbose -h 'Enable verbose mode'
+add_argument --short f --long force --help 'Force operation'
+add_argument -l debug -h 'Enable debug mode'
+add_argument -s q -h 'Quiet mode'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added add_argument function (now ~195 lines)
+
+### Testing performed
+- Verified add_argument with both short and long flags works
+- Verified add_argument with only short flag works
+- Verified add_argument with only long flag works
+- Verified long-form option syntax (--short, --long, --help) works
+- Verified destination variable naming from flag names
+- Verified hyphenated flag names convert correctly (dry-run → DRY_RUN)
+- Verified error handling when no flags are provided
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
