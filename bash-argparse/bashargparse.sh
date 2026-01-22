@@ -119,6 +119,7 @@ argparse_init() {
 #   -d, --default VALUE  Default value
 #   -r, --required       Mark argument as required
 #   -t, --type TYPE      Type validation: string (default), int
+#   -c, --choices LIST   Comma-separated list of valid choices
 #   -a, --action ACTION  Action: store (default), store_true
 #
 # For boolean flags (store_true):
@@ -130,6 +131,9 @@ argparse_init() {
 #
 # For integer arguments:
 #   add_argument -l port -t int -d '8080' -h 'Port number'
+#
+# For choices validation:
+#   add_argument -l level -c 'debug,info,warn,error' -h 'Log level'
 #
 # For positional arguments:
 #   add_argument -p filename -h 'Input file to process'
@@ -144,6 +148,7 @@ add_argument() {
     local default_was_set=0
     local required=0
     local type="string"
+    local choices=""
     local action=""
     local dest=""
 
@@ -177,6 +182,10 @@ add_argument() {
                 ;;
             -t|--type)
                 type="$2"
+                shift 2
+                ;;
+            -c|--choices)
+                choices="$2"
                 shift 2
                 ;;
             -a|--action)
@@ -223,6 +232,12 @@ add_argument() {
         return 1
     fi
 
+    # Validate: choices validation doesn't make sense for store_true
+    if [[ -n "$choices" && "$action" == "store_true" ]]; then
+        echo "add_argument: choices cannot be used with 'store_true' action" >&2
+        return 1
+    fi
+
     # Determine action if not explicitly set
     if [[ -z "$action" ]]; then
         action="store"
@@ -262,7 +277,7 @@ add_argument() {
     _ARGPARSE_DEFAULT[$idx]="$default"
     _ARGPARSE_REQUIRED[$idx]="$required"
     _ARGPARSE_TYPE[$idx]="$type"
-    _ARGPARSE_CHOICES[$idx]=""
+    _ARGPARSE_CHOICES[$idx]="$choices"
     _ARGPARSE_ACTION[$idx]="$action"
     _ARGPARSE_NARGS[$idx]=""
     _ARGPARSE_DEST[$idx]="$dest"
@@ -283,6 +298,22 @@ _argparse_is_int() {
     local value="$1"
     # Match optional leading minus/plus sign followed by one or more digits
     [[ "$value" =~ ^[+-]?[0-9]+$ ]]
+}
+
+# Validate that a value is one of the allowed choices
+# Usage: _argparse_in_choices value choices_csv
+# Returns: 0 if value is in choices, 1 otherwise
+_argparse_in_choices() {
+    local value="$1"
+    local choices_csv="$2"
+    local IFS=','
+    local choice
+    for choice in $choices_csv; do
+        if [[ "$value" == "$choice" ]]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Print short usage line (for error messages)
@@ -336,13 +367,17 @@ argparse_help() {
             local help_text="${_ARGPARSE_HELP[$idx]}"
             local default="${_ARGPARSE_DEFAULT[$idx]}"
             local required="${_ARGPARSE_REQUIRED[$idx]}"
+            local choices="${_ARGPARSE_CHOICES[$idx]}"
 
             # Format: "  name          help text"
             printf "  %-20s" "$pos_name"
             if [[ -n "$help_text" ]]; then
                 printf "%s" "$help_text"
             fi
-            if [[ "$required" == "1" ]]; then
+            # Show choices if defined
+            if [[ -n "$choices" ]]; then
+                printf " (choices: %s)" "$choices"
+            elif [[ "$required" == "1" ]]; then
                 printf " (required)"
             elif [[ -n "$default" ]]; then
                 printf " (default: %s)" "$default"
@@ -363,6 +398,7 @@ argparse_help() {
         local help_text="${_ARGPARSE_HELP[$idx]}"
         local default="${_ARGPARSE_DEFAULT[$idx]}"
         local action="${_ARGPARSE_ACTION[$idx]}"
+        local choices="${_ARGPARSE_CHOICES[$idx]}"
 
         # Skip positional arguments
         if [[ -n "${_ARGPARSE_POSITIONAL[$idx]}" ]]; then
@@ -396,8 +432,11 @@ argparse_help() {
         if [[ -n "$help_text" ]]; then
             printf "%s" "$help_text"
         fi
+        # Show choices if defined
+        if [[ -n "$choices" ]]; then
+            printf " (choices: %s)" "$choices"
         # Show required indicator
-        if [[ "${_ARGPARSE_REQUIRED[$idx]}" == "1" ]]; then
+        elif [[ "${_ARGPARSE_REQUIRED[$idx]}" == "1" ]]; then
             printf " (required)"
         # Show default for store actions (not for store_true where default is always 0)
         elif [[ "$action" == "store" && -n "$default" ]]; then
@@ -497,6 +536,15 @@ argparse_parse() {
                                     return 1
                                 fi
                             fi
+                            # Choices validation
+                            local arg_choices="${_ARGPARSE_CHOICES[$idx]}"
+                            if [[ -n "$arg_choices" ]]; then
+                                if ! _argparse_in_choices "$value" "$arg_choices"; then
+                                    _argparse_usage
+                                    echo "$_ARGPARSE_PROG: error: argument $arg: invalid choice: '$value' (choose from: $arg_choices)" >&2
+                                    return 1
+                                fi
+                            fi
                             declare -g "ARG_${dest}=${value}"
                             ;;
                     esac
@@ -532,6 +580,15 @@ argparse_parse() {
             if ! _argparse_is_int "$value"; then
                 _argparse_usage
                 echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid int value: '$value'" >&2
+                return 1
+            fi
+        fi
+        # Choices validation for positional arguments
+        local arg_choices="${_ARGPARSE_CHOICES[$idx]}"
+        if [[ -n "$arg_choices" ]]; then
+            if ! _argparse_in_choices "$value" "$arg_choices"; then
+                _argparse_usage
+                echo "$_ARGPARSE_PROG: error: argument $pos_name: invalid choice: '$value' (choose from: $arg_choices)" >&2
                 return 1
             fi
         fi

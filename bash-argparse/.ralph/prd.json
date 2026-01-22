@@ -72,7 +72,7 @@
       "id": "010",
       "title": "Implement choices validation",
       "description": "Add -c/--choices option to add_argument. Validate during parse that value is one of the allowed choices. Example: add_argument -l level -c 'debug,info,warn,error'",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["009"]
     },
     {

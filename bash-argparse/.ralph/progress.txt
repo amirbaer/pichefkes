@@ -439,3 +439,51 @@ add_argument -p count -t int -h 'Number of items'
 
 ---
 
+## Task 010: Implement choices validation
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-c/--choices` option to `add_argument()` function for specifying allowed values
+- Choices are specified as a comma-separated list (e.g., `'debug,info,warn,error'`)
+- Implemented `_argparse_in_choices()` helper function that validates values against choices
+- Added choices validation during parsing in `argparse_parse()`:
+  - Validates value flags when using `store` action
+  - Validates positional arguments
+- Error messages follow Python argparse style: "error: argument --flag: invalid choice: 'value' (choose from: choices)"
+- Added validation to prevent combining choices with `store_true` action (makes no sense)
+- Updated help output to display available choices for both flags and positional arguments
+  - Shows "(choices: a,b,c)" instead of "(default: ...)" when choices are defined
+
+### API
+```bash
+# Flags with choices:
+add_argument -l level -c 'debug,info,warn,error' -h 'Log level'
+add_argument -s f -l format -c 'json,xml,csv' -h 'Output format'
+
+# Positional arguments with choices:
+add_argument -p action -c 'start,stop,restart' -h 'Action to perform'
+
+# Validation errors look like:
+# usage: prog [options] action
+# prog: error: argument --level: invalid choice: 'invalid' (choose from: debug,info,warn,error)
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `-c/--choices` option parsing, `_argparse_in_choices()` helper, choices validation in `argparse_parse()`, and choices display in `argparse_help()` (now ~610 lines)
+
+### Testing performed
+- Verified valid choice for flag is accepted
+- Verified invalid choice for flag is rejected with proper error message
+- Verified valid choice for positional argument is accepted
+- Verified invalid choice for positional argument is rejected
+- Verified choices are displayed in help output for both flags and positionals
+- Verified choices with store_true is correctly rejected
+- Verified short flags with choices work correctly
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
