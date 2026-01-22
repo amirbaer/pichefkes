@@ -335,3 +335,57 @@ argparse_parse "$@"
 
 ---
 
+## Task 008: Implement required flag validation
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-r/--required` option to `add_argument()` function
+- Implemented required argument tracking during parsing
+- Added validation after parsing to check all required arguments are provided
+- Created `_argparse_usage()` helper function to display short usage line for error messages
+- Error messages follow Python argparse style: "error: the following argument is required: --name"
+- Updated help output to show "(required)" instead of "(default: ...)" for required arguments
+- Works for both flags (value flags, boolean flags) and positional arguments
+
+### API
+```bash
+# Required value flags:
+add_argument -l config -r -h 'Config file (required)'
+add_argument --long output --required --help 'Output file (required)'
+
+# Required positional arguments:
+add_argument -p filename -r -h 'Input file (required)'
+
+# Multiple required args can be defined:
+add_argument -l config -r -h 'Config file'
+add_argument -l output -r -h 'Output file'
+add_argument -p input -r -h 'Input file'
+
+# When required args are missing:
+# usage: prog [options] input
+# prog: error: the following argument is required: --config
+# prog: error: the following argument is required: --output
+# prog: error: the following argument is required: input
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `-r/--required` option parsing, `_argparse_usage()` helper, required validation in `argparse_parse()`, and "(required)" display in help output (now ~510 lines)
+
+### Testing performed
+- Verified required value flag detection when missing
+- Verified required value flag works when provided
+- Verified required positional argument detection when missing
+- Verified required positional argument works when provided
+- Verified multiple required arguments all reported when missing
+- Verified multiple required arguments work when all provided
+- Verified short-flag-only required arguments work
+- Verified help output shows "(required)" for required args
+- Verified compatibility with `set -e` scripts
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+

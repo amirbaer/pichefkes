@@ -58,7 +58,7 @@
       "id": "008",
       "title": "Implement required flag validation",
       "description": "Add -r/--required option to add_argument. During parse, validate that required arguments are provided. Print error and usage if missing.",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["007"]
     },
     {

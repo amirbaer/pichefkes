@@ -117,6 +117,7 @@ argparse_init() {
 #   -p, --positional NAME  Positional argument name (e.g., 'filename')
 #   -h, --help TEXT      Help text for this argument
 #   -d, --default VALUE  Default value
+#   -r, --required       Mark argument as required
 #   -a, --action ACTION  Action: store (default), store_true
 #
 # For boolean flags (store_true):
@@ -124,7 +125,7 @@ argparse_init() {
 #
 # For value flags (store):
 #   add_argument -s o -l output -d '/tmp/out' -h 'Output file'
-#   add_argument -l config -h 'Config file path'
+#   add_argument -l config -r -h 'Config file path (required)'
 #
 # For positional arguments:
 #   add_argument -p filename -h 'Input file to process'
@@ -137,6 +138,7 @@ add_argument() {
     local help=""
     local default=""
     local default_was_set=0
+    local required=0
     local action=""
     local dest=""
 
@@ -163,6 +165,10 @@ add_argument() {
                 default="$2"
                 default_was_set=1
                 shift 2
+                ;;
+            -r|--required)
+                required=1
+                shift 1
                 ;;
             -a|--action)
                 action="$2"
@@ -233,7 +239,7 @@ add_argument() {
     _ARGPARSE_POSITIONAL[$idx]="$positional"
     _ARGPARSE_HELP[$idx]="$help"
     _ARGPARSE_DEFAULT[$idx]="$default"
-    _ARGPARSE_REQUIRED[$idx]="0"
+    _ARGPARSE_REQUIRED[$idx]="$required"
     _ARGPARSE_TYPE[$idx]="string"
     _ARGPARSE_CHOICES[$idx]=""
     _ARGPARSE_ACTION[$idx]="$action"
@@ -247,6 +253,18 @@ add_argument() {
 
     # Increment argument count
     _ARGPARSE_ARG_COUNT=$((_ARGPARSE_ARG_COUNT + 1))
+}
+
+# Print short usage line (for error messages)
+# Usage: _argparse_usage
+_argparse_usage() {
+    local prog="$_ARGPARSE_PROG"
+    local usage="usage: $prog [options]"
+    for idx in "${_ARGPARSE_POSITIONAL_ORDER[@]}"; do
+        local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
+        usage="$usage $pos_name"
+    done
+    echo "$usage" >&2
 }
 
 # Display help message and exit
@@ -287,13 +305,16 @@ argparse_help() {
             local pos_name="${_ARGPARSE_POSITIONAL[$idx]}"
             local help_text="${_ARGPARSE_HELP[$idx]}"
             local default="${_ARGPARSE_DEFAULT[$idx]}"
+            local required="${_ARGPARSE_REQUIRED[$idx]}"
 
             # Format: "  name          help text"
             printf "  %-20s" "$pos_name"
             if [[ -n "$help_text" ]]; then
                 printf "%s" "$help_text"
             fi
-            if [[ -n "$default" ]]; then
+            if [[ "$required" == "1" ]]; then
+                printf " (required)"
+            elif [[ -n "$default" ]]; then
                 printf " (default: %s)" "$default"
             fi
             echo
@@ -345,8 +366,11 @@ argparse_help() {
         if [[ -n "$help_text" ]]; then
             printf "%s" "$help_text"
         fi
+        # Show required indicator
+        if [[ "${_ARGPARSE_REQUIRED[$idx]}" == "1" ]]; then
+            printf " (required)"
         # Show default for store actions (not for store_true where default is always 0)
-        if [[ "$action" == "store" && -n "$default" ]]; then
+        elif [[ "$action" == "store" && -n "$default" ]]; then
             printf " (default: %s)" "$default"
         fi
         echo
@@ -370,6 +394,7 @@ argparse_help() {
 argparse_parse() {
     local -a args=("$@")
     local -a positional_values=()
+    local -a _arg_was_provided=()  # Track which args were provided (by index)
     local i=0
 
     # Check for help flags first (before any other processing)
@@ -380,12 +405,13 @@ argparse_parse() {
         fi
     done
 
-    # Initialize all arguments with their default values
+    # Initialize all arguments with their default values and tracking
     for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
         local dest="${_ARGPARSE_DEST[$idx]}"
         local default="${_ARGPARSE_DEFAULT[$idx]}"
         # Export as ARG_<DEST>
         declare -g "ARG_${dest}=${default}"
+        _arg_was_provided[$idx]=0
     done
 
     # Parse arguments
@@ -417,6 +443,7 @@ argparse_parse() {
 
                 if [[ $is_match -eq 1 ]]; then
                     matched=1
+                    _arg_was_provided[$idx]=1
 
                     case "$action" in
                         store_true)
@@ -458,7 +485,35 @@ argparse_parse() {
         local idx="${_ARGPARSE_POSITIONAL_ORDER[$p]}"
         local dest="${_ARGPARSE_DEST[$idx]}"
         declare -g "ARG_${dest}=${positional_values[$p]}"
+        _arg_was_provided[$idx]=1
     done
+
+    # Validate required arguments
+    local missing_args=()
+    for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
+        local required="${_ARGPARSE_REQUIRED[$idx]}"
+        if [[ "$required" == "1" && "${_arg_was_provided[$idx]}" == "0" ]]; then
+            # Build argument name for error message
+            local arg_name=""
+            if [[ -n "${_ARGPARSE_POSITIONAL[$idx]}" ]]; then
+                arg_name="${_ARGPARSE_POSITIONAL[$idx]}"
+            elif [[ -n "${_ARGPARSE_LONG[$idx]}" ]]; then
+                arg_name="--${_ARGPARSE_LONG[$idx]}"
+            else
+                arg_name="-${_ARGPARSE_SHORT[$idx]}"
+            fi
+            missing_args+=("$arg_name")
+        fi
+    done
+
+    # Report missing required arguments
+    if [[ ${#missing_args[@]} -gt 0 ]]; then
+        _argparse_usage
+        for arg in "${missing_args[@]}"; do
+            echo "$_ARGPARSE_PROG: error: the following argument is required: $arg" >&2
+        done
+        return 1
+    fi
 
     return 0
 }
