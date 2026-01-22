@@ -246,5 +246,107 @@ add_argument() {
     fi
 
     # Increment argument count
-    ((_ARGPARSE_ARG_COUNT++))
+    _ARGPARSE_ARG_COUNT=$((_ARGPARSE_ARG_COUNT + 1))
+}
+
+# Parse command line arguments
+# Usage: argparse_parse "$@"
+#
+# This function parses the provided arguments and sets result variables.
+# Variables are named ARG_<DEST> where DEST is derived from the argument name.
+#
+# Example:
+#   argparse_init 'myprogram' 'A demo program'
+#   add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+#   add_argument -l output -d '/tmp/out' -h 'Output file'
+#   add_argument -p filename -h 'Input file'
+#   argparse_parse "$@"
+#   # Now available: $ARG_VERBOSE, $ARG_OUTPUT, $ARG_FILENAME
+#
+argparse_parse() {
+    local -a args=("$@")
+    local -a positional_values=()
+    local i=0
+
+    # Initialize all arguments with their default values
+    for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
+        local dest="${_ARGPARSE_DEST[$idx]}"
+        local default="${_ARGPARSE_DEFAULT[$idx]}"
+        # Export as ARG_<DEST>
+        declare -g "ARG_${dest}=${default}"
+    done
+
+    # Parse arguments
+    while [[ $i -lt ${#args[@]} ]]; do
+        local arg="${args[$i]}"
+        local matched=0
+
+        # Check if it's a flag (starts with -)
+        if [[ "$arg" == -* ]]; then
+            # Try to match against defined flags
+            for ((idx=0; idx < _ARGPARSE_ARG_COUNT; idx++)); do
+                local short="${_ARGPARSE_SHORT[$idx]}"
+                local long="${_ARGPARSE_LONG[$idx]}"
+                local action="${_ARGPARSE_ACTION[$idx]}"
+                local dest="${_ARGPARSE_DEST[$idx]}"
+
+                # Skip positional arguments (they don't have flags)
+                if [[ -n "${_ARGPARSE_POSITIONAL[$idx]}" ]]; then
+                    continue
+                fi
+
+                # Check for match
+                local is_match=0
+                if [[ -n "$short" && "$arg" == "-$short" ]]; then
+                    is_match=1
+                elif [[ -n "$long" && "$arg" == "--$long" ]]; then
+                    is_match=1
+                fi
+
+                if [[ $is_match -eq 1 ]]; then
+                    matched=1
+
+                    case "$action" in
+                        store_true)
+                            # Set to 1
+                            declare -g "ARG_${dest}=1"
+                            ;;
+                        store)
+                            # Get the next argument as the value
+                            i=$((i + 1))
+                            if [[ $i -ge ${#args[@]} ]]; then
+                                echo "Error: $arg requires a value" >&2
+                                return 1
+                            fi
+                            declare -g "ARG_${dest}=${args[$i]}"
+                            ;;
+                    esac
+                    break
+                fi
+            done
+
+            # Check for unknown flag
+            if [[ $matched -eq 0 ]]; then
+                echo "Error: unknown option: $arg" >&2
+                return 1
+            fi
+        else
+            # Not a flag - treat as positional argument
+            positional_values+=("$arg")
+        fi
+
+        i=$((i + 1))
+    done
+
+    # Assign positional values to positional arguments in order
+    local pos_count=${#_ARGPARSE_POSITIONAL_ORDER[@]}
+    local val_count=${#positional_values[@]}
+
+    for ((p=0; p < pos_count && p < val_count; p++)); do
+        local idx="${_ARGPARSE_POSITIONAL_ORDER[$p]}"
+        local dest="${_ARGPARSE_DEST[$idx]}"
+        declare -g "ARG_${dest}=${positional_values[$p]}"
+    done
+
+    return 0
 }

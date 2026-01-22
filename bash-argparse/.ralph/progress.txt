@@ -213,3 +213,64 @@ add_argument -l output -d '/tmp/out' -h 'Output path'
 
 ---
 
+## Task 006: Implement argparse_parse function
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `argparse_parse()` function in bashargparse.sh
+- Function parses command line arguments passed as `"$@"`
+- Initializes all arguments with their default values before parsing
+- Handles boolean flags (`store_true` action) - sets ARG_* to 1 when flag is present
+- Handles value flags (`store` action) - sets ARG_* to the provided value
+- Handles positional arguments in order of definition
+- Supports mixing flags and positional arguments in any order
+- Reports errors for:
+  - Unknown flags/options
+  - Value flags missing their value argument
+- Result variables are accessible as `$ARG_<DEST>` where DEST is derived from the argument name
+  - Example: `--verbose` → `$ARG_VERBOSE`, `--output-dir` → `$ARG_OUTPUT_DIR`
+
+### API
+```bash
+argparse_parse "$@"
+
+# Example usage:
+argparse_init 'myprogram' 'A demo program'
+add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+add_argument -l output -d '/tmp/out' -h 'Output file'
+add_argument -p filename -h 'Input file'
+argparse_parse "$@"
+
+# Result variables available:
+# $ARG_VERBOSE  - 0 or 1
+# $ARG_OUTPUT   - value or default
+# $ARG_FILENAME - positional argument value
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added argparse_parse function (now ~350 lines)
+
+### Testing performed
+- Verified boolean flag with no args uses default (0)
+- Verified boolean flag with short flag (-v) sets to 1
+- Verified boolean flag with long flag (--verbose) sets to 1
+- Verified value flag uses default when not provided
+- Verified value flag with short flag (-o value) sets value
+- Verified value flag with long flag (--output value) sets value
+- Verified single positional argument works
+- Verified positional argument with default works
+- Verified multiple positional arguments are assigned in order
+- Verified mixed flags and positionals work correctly
+- Verified positionals before and after flags work correctly
+- Verified hyphenated flag names convert to valid variable names (--dry-run → ARG_DRY_RUN)
+- Verified unknown flag error handling
+- Verified missing value error handling for value flags
+- Verified compatibility with `set -e` scripts (fixed arithmetic operations)
+- Verified bash syntax check passes
+
+### Issues encountered
+- Initial implementation had incompatibility with `set -e` scripts due to `(( ))` arithmetic returning exit code 1 when result is 0. Fixed by using `$(( ))` assignment syntax instead.
+
+---
+
