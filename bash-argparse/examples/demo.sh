@@ -232,4 +232,112 @@ if [[ -n "$ARG_COORDS" ]]; then
 fi
 
 echo
+
+# =============================================================================
+# LIMITATIONS vs Python argparse
+# =============================================================================
+# bashargparse implements the 80/20 of argparse features. The following
+# features from Python's argparse are NOT implemented:
+
+echo "=========================================="
+echo "LIMITATIONS vs Python argparse"
+echo "=========================================="
+echo
+echo "bashargparse implements the 80/20 of argparse features."
+echo "The following features from Python's argparse are NOT implemented:"
+echo
+echo "--- NOT IMPLEMENTED ---"
+echo
+echo "  Subcommands (subparsers)"
+echo "    Python: subparsers = parser.add_subparsers()"
+echo "    Status: Not supported. Use separate scripts or case statements."
+echo
+echo "  Argument groups"
+echo "    Python: group = parser.add_argument_group('group name')"
+echo "    Status: Not supported. All arguments appear in one section."
+echo
+echo "  Mutually exclusive groups"
+echo "    Python: group = parser.add_mutually_exclusive_group()"
+echo "    Status: Not supported. Validate manually after parsing."
+echo
+echo "  Environment variable defaults"
+echo "    Python: (typically via custom action or wrapper)"
+echo "    Status: Not supported. Use: add_argument -d \"\${VAR:-default}\""
+echo
+echo "  Config file integration"
+echo "    Python: (via fromfile_prefix_chars or custom)"
+echo "    Status: Not supported. Source config before parsing."
+echo
+echo "  store_false action"
+echo "    Python: action='store_false'"
+echo "    Status: Not supported. Use store_true and invert logic."
+echo
+echo "  append action"
+echo "    Python: action='append' (--item a --item b -> ['a','b'])"
+echo "    Status: Not supported. Use nargs '+' instead."
+echo
+echo "  extend action"
+echo "    Python: action='extend'"
+echo "    Status: Not supported. Use nargs '+' instead."
+echo
+echo "  Type functions (custom)"
+echo "    Python: type=argparse.FileType('r'), type=custom_func"
+echo "    Status: Only 'int' type supported. Validate manually for others."
+echo
+echo "  metavar"
+echo "    Python: metavar='FILE' (custom placeholder in help)"
+echo "    Status: Not supported. Always shows 'VALUE'."
+echo
+echo "  dest (custom destination)"
+echo "    Python: dest='custom_name'"
+echo "    Status: Not supported. Destination derived from flag name."
+echo
+echo "  nargs '?' (optional value)"
+echo "    Python: nargs='?' with const for flag-without-value case"
+echo "    Status: Not supported. Use separate boolean flag."
+echo
+echo "  Prefix characters"
+echo "    Python: prefix_chars='-+'"
+echo "    Status: Only '-' prefix supported."
+echo
+echo "  Argument abbreviation"
+echo "    Python: --verbose can match --verb"
+echo "    Status: Not supported. Exact match required."
+echo
+echo "--- DIFFERENCES ---"
+echo
+echo "  Result storage"
+echo "    Python: args.verbose (namespace object)"
+echo "    Bash:   \$ARG_VERBOSE (environment variable)"
+echo
+echo "  nargs results"
+echo "    Python: Returns list ['a', 'b', 'c']"
+echo "    Bash:   Returns space-separated string 'a b c'"
+echo "           Iterate with: for item in \$ARG_VAR; do ...; done"
+echo
+echo "  Boolean values"
+echo "    Python: True/False"
+echo "    Bash:   1/0 (check with -eq 1 or -eq 0)"
+echo
+echo "  Help flag"
+echo "    Python: -h/--help can be disabled"
+echo "    Bash:   -h/--help always reserved, cannot be overridden"
+echo
+echo "  Error handling"
+echo "    Python: Raises SystemExit with message"
+echo "    Bash:   Prints to stderr and exits with code 1"
+echo
+echo "--- BASH-SPECIFIC NOTES ---"
+echo
+echo "  Requires bash 4.2+ (for 'declare -g')"
+echo "    macOS ships with bash 3.2 - install newer via: brew install bash"
+echo
+echo "  Whitespace in values"
+echo "    Values with spaces work for single-value arguments."
+echo "    For nargs, values are space-separated (no embedded spaces)."
+echo
+echo "  Combined short flags"
+echo "    -vvv works for count actions (increments 3 times)"
+echo "    -abc does NOT work as -a -b -c for different flags"
+echo
 echo "Done!"

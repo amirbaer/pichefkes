@@ -633,6 +633,57 @@ add_argument -l levels -n '+' -c 'a,b,c' -h 'One or more levels from choices'
 
 ---
 
+## Task 014: Document limitations vs Python argparse
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added comprehensive LIMITATIONS section to `examples/demo.sh` output
+- The LIMITATIONS section is displayed when running the demo script
+- Documents three categories of differences:
+
+**NOT IMPLEMENTED features:**
+1. Subcommands (subparsers)
+2. Argument groups
+3. Mutually exclusive groups
+4. Environment variable defaults
+5. Config file integration
+6. store_false action
+7. append action
+8. extend action
+9. Type functions (custom types)
+10. metavar (custom placeholder)
+11. dest (custom destination)
+12. nargs '?' (optional value)
+13. Prefix characters (only '-' supported)
+14. Argument abbreviation
+
+**DIFFERENCES from Python:**
+1. Result storage (environment variables vs namespace object)
+2. nargs results (space-separated string vs list)
+3. Boolean values (1/0 vs True/False)
+4. Help flag (-h/--help always reserved)
+5. Error handling (stderr + exit vs SystemExit)
+
+**BASH-SPECIFIC NOTES:**
+1. Requires bash 4.2+ (for `declare -g`)
+2. Whitespace handling in values
+3. Combined short flags (only works for count actions)
+
+### Files created/modified
+- **Modified:** `examples/demo.sh` - Added LIMITATIONS section to script output (~100 new lines)
+
+### Testing performed
+- Verified `--help` still works correctly
+- Verified normal demo execution displays all sections including LIMITATIONS
+- Verified LIMITATIONS output is well-formatted and readable
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
 ## Task 013: Create comprehensive demo script
 **Date:** 2026-01-22
 **Status:** Completed

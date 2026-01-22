@@ -100,7 +100,7 @@
       "id": "014",
       "title": "Document limitations vs Python argparse",
       "description": "Add a LIMITATIONS section to the demo script output that clearly lists what's different/missing compared to Python argparse (subcommands, argument groups, mutually exclusive groups, etc.)",
-      "status": "open",
+      "status": "completed",
       "dependencies": ["013"]
     },
     {
