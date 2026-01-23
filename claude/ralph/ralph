@@ -311,6 +311,319 @@ def print_completed_tasks(prd: dict, indent: str = "    "):
 # ═══════════════════════════════════════════════════════════════════
 
 
+def get_ralph_implementation_dir() -> Path:
+    """Get the directory where ralph's implementation lives."""
+    # This script's actual location (resolving symlinks)
+    return Path(__file__).resolve().parent
+
+
+def verify_installation(target_dir: Path, ralph_impl_dir: Path) -> bool:
+    """Verify an existing ralph installation and report/fix issues."""
+    ralph_dir = target_dir / ".ralph"
+    ralph_script = ralph_impl_dir / "ralph"
+    issues = []
+    fixed = []
+
+    print(f"  {C.BOLD}{C.LAVENDER}Verifying Ralph Installation{C.NC}")
+    print()
+    print(f"  {C.DIM}Project:{C.NC}   {C.SAGE}{target_dir}{C.NC}")
+    print(f"  {C.DIM}Ralph at:{C.NC}  {C.SAGE}{ralph_impl_dir}{C.NC}")
+    print()
+
+    # Check symlink
+    symlink_path = ralph_dir / "ralph"
+    if symlink_path.exists():
+        if symlink_path.is_symlink():
+            link_target = symlink_path.resolve()
+            if link_target == ralph_script:
+                print(f"  {C.MINT}✓{C.NC} Symlink correct: .ralph/ralph → {ralph_script}")
+            else:
+                print(f"  {C.CORAL}✗{C.NC} Symlink points to wrong location: {link_target}")
+                issues.append(("symlink_wrong", symlink_path, ralph_script))
+        else:
+            print(f"  {C.CORAL}✗{C.NC} .ralph/ralph is not a symlink (it's a regular file)")
+            issues.append(("symlink_not_link", symlink_path, ralph_script))
+    else:
+        print(f"  {C.CORAL}✗{C.NC} Missing: .ralph/ralph symlink")
+        issues.append(("symlink_missing", symlink_path, ralph_script))
+
+    # Check required directories
+    runs_dir = ralph_dir / "runs"
+    if runs_dir.exists() and runs_dir.is_dir():
+        print(f"  {C.MINT}✓{C.NC} Directory exists: .ralph/runs/")
+    else:
+        print(f"  {C.CORAL}✗{C.NC} Missing: .ralph/runs/ directory")
+        issues.append(("dir_missing", runs_dir))
+
+    # Check required files
+    for filename in ("README.md", "CYCLE.md", "NOTES.md"):
+        filepath = ralph_dir / filename
+        if filepath.exists():
+            print(f"  {C.MINT}✓{C.NC} File exists: .ralph/{filename}")
+        else:
+            print(f"  {C.YELLOW}○{C.NC} Missing: .ralph/{filename}")
+            issues.append(("file_missing", filepath, filename))
+
+    print()
+
+    if not issues:
+        print(f"  {C.MINT}✓ Installation verified - everything looks good!{C.NC}")
+        print()
+        return True
+
+    # Offer to fix issues
+    print(f"  {C.YELLOW}Found {len(issues)} issue(s). Attempting to fix...{C.NC}")
+    print()
+
+    for issue in issues:
+        issue_type = issue[0]
+
+        if issue_type == "symlink_missing":
+            symlink_path, target = issue[1], issue[2]
+            symlink_path.symlink_to(target)
+            print(f"  {C.MINT}✓{C.NC} Created symlink: .ralph/ralph")
+            fixed.append(issue)
+
+        elif issue_type == "symlink_wrong":
+            symlink_path, target = issue[1], issue[2]
+            symlink_path.unlink()
+            symlink_path.symlink_to(target)
+            print(f"  {C.MINT}✓{C.NC} Fixed symlink: .ralph/ralph")
+            fixed.append(issue)
+
+        elif issue_type == "symlink_not_link":
+            symlink_path, target = issue[1], issue[2]
+            # Backup the file first
+            backup_path = symlink_path.with_suffix(".backup")
+            symlink_path.rename(backup_path)
+            symlink_path.symlink_to(target)
+            print(f"  {C.MINT}✓{C.NC} Replaced file with symlink (backup: {backup_path.name})")
+            fixed.append(issue)
+
+        elif issue_type == "dir_missing":
+            dir_path = issue[1]
+            dir_path.mkdir(parents=True)
+            print(f"  {C.MINT}✓{C.NC} Created directory: {dir_path.relative_to(target_dir)}")
+            fixed.append(issue)
+
+        elif issue_type == "file_missing":
+            # Don't auto-create content files - just warn
+            filepath, filename = issue[1], issue[2]
+            print(f"  {C.DIM}○{C.NC} Skipped: .ralph/{filename} (create manually or reinstall)")
+
+    print()
+
+    unfixed = len(issues) - len(fixed)
+    if unfixed == 0:
+        print(f"  {C.MINT}✓ All issues fixed!{C.NC}")
+    else:
+        print(f"  {C.YELLOW}○ {unfixed} issue(s) need manual attention{C.NC}")
+
+    print()
+    return unfixed == 0
+
+
+def cmd_install(args, target_dir: Path):
+    """Install ralph in a new project directory, or verify existing installation."""
+    ralph_impl_dir = get_ralph_implementation_dir()
+    ralph_script = ralph_impl_dir / "ralph"
+    ralph_dir = target_dir / ".ralph"
+
+    # If already installed, verify the installation
+    if ralph_dir.exists():
+        return verify_installation(target_dir, ralph_impl_dir)
+
+    print(f"  {C.BOLD}{C.LAVENDER}Installing Ralph{C.NC}")
+    print()
+    print(f"  {C.DIM}Target:{C.NC}    {C.SAGE}{target_dir}{C.NC}")
+    print(f"  {C.DIM}Ralph at:{C.NC}  {C.SAGE}{ralph_impl_dir}{C.NC}")
+    print()
+
+    # Create directory structure
+    ralph_dir.mkdir(parents=True)
+    (ralph_dir / "runs").mkdir()
+
+    # Create symlink to ralph script
+    symlink_path = ralph_dir / "ralph"
+    symlink_path.symlink_to(ralph_script)
+    print(f"  {C.MINT}✓{C.NC} Created symlink: .ralph/ralph")
+
+    # Create README.md
+    readme_content = f"""# Ralph - Development Loop Runner
+
+This project uses **Ralph**, a development iteration system for Claude Code.
+
+## Quick Start
+
+```bash
+.ralph/ralph run      # Execute PRD tasks
+.ralph/ralph info     # Show current status
+.ralph/ralph runs     # List all runs
+```
+
+## How It Works
+
+Ralph runs Claude Code in fresh sessions to complete tasks from a PRD (Product Requirements Document).
+
+1. **Create a PRD** in `.ralph/runs/run-NNN-description/prd.json`
+2. **Run Ralph** with `.ralph/ralph run`
+3. **Claude works** on one task per iteration
+4. **Ralph commits** changes and moves to next task
+5. **Milestones pause** for manual verification
+
+## Directory Structure
+
+```
+.ralph/
+├── ralph          → Symlink to central implementation
+├── README.md      → This file
+├── CYCLE.md       → Current development stage
+├── NOTES.md       → User constraints & project context
+└── runs/          → PRD runs
+    └── run-001-*/
+        ├── prd.json      → Task definitions
+        └── progress.txt  → Execution log
+```
+
+## Important: Making Changes to Ralph
+
+**DO NOT modify the ralph script in this repo.**
+
+The `ralph` file in `.ralph/` is a symlink to the central implementation.
+To find where Ralph lives, check the symlink:
+
+```bash
+ls -la .ralph/ralph
+```
+
+If you want to improve or fix Ralph:
+1. Follow the symlink to find the implementation repo
+2. Make your changes there
+3. All projects using Ralph will get the updates
+
+This keeps Ralph consistent across all projects and makes updates easy.
+
+## PRD Format
+
+PRDs are JSON files with this structure:
+
+```json
+{{
+  "title": "Project Name",
+  "status": "active",
+  "stories": [
+    {{
+      "id": "001",
+      "title": "Task title",
+      "description": "What to do",
+      "status": "open",
+      "dependencies": []
+    }},
+    {{
+      "id": "M1",
+      "title": "Milestone: Review Progress",
+      "category": "milestone",
+      "status": "open",
+      "dependencies": ["001"]
+    }}
+  ]
+}}
+```
+
+- Task IDs starting with `M` are milestones (require manual verification)
+- Dependencies must be completed before a task becomes available
+- Status: `open` → `completed`
+
+## Tips
+
+- Read `NOTES.md` before starting - it contains important constraints
+- Check `CYCLE.md` to know what development stage you're in
+- Milestones pause execution for human review
+- Run `ralph info` to see current progress
+
+---
+
+*Check `.ralph/ralph` symlink to find Ralph's implementation repo*
+"""
+    (ralph_dir / "README.md").write_text(readme_content)
+    print(f"  {C.MINT}✓{C.NC} Created README.md")
+
+    # Create CYCLE.md
+    cycle_content = """# Development Cycle
+
+Current stage in the development cycle.
+
+## Stages
+
+```
+║ 1. DISCUSS & MAP    → Talk with user, explore problems
+║ 2. DESIGN PRD       → Convert discussion into structured tasks
+▶ 3. EXECUTE PRD      → Run ralph loop, complete tasks
+║ 4. EVALUATE         → Test, review, document learnings
+║ 5. NEW CYCLE        → Archive and start fresh
+```
+
+---
+
+*Update the arrow (▶) to indicate current stage*
+"""
+    (ralph_dir / "CYCLE.md").write_text(cycle_content)
+    print(f"  {C.MINT}✓{C.NC} Created CYCLE.md")
+
+    # Create NOTES.md
+    notes_content = """# User Notes & Directives
+
+**This file contains important context for Claude. Read before each iteration.**
+
+---
+
+## Project Context
+
+*(Describe what this project is and what you're trying to accomplish)*
+
+---
+
+## User Requirements
+
+*(Add specific requirements, constraints, and preferences here)*
+
+---
+
+## Technical Decisions
+
+*(Document important technical decisions and their rationale)*
+
+---
+
+## Constraints (Don't Do These)
+
+*(List things that should NOT be done)*
+
+---
+
+## Learnings & Insights
+
+*(Update as project progresses)*
+
+---
+
+*Last updated: (date)*
+"""
+    (ralph_dir / "NOTES.md").write_text(notes_content)
+    print(f"  {C.MINT}✓{C.NC} Created NOTES.md")
+
+    print()
+    print(f"  {C.MINT}✓ Ralph installed successfully!{C.NC}")
+    print()
+    print(f"  {C.BOLD}{C.LAVENDER}Next steps:{C.NC}")
+    print(f"    1. Edit {C.SAGE}.ralph/NOTES.md{C.NC} with project context")
+    print(f"    2. Create a PRD in {C.SAGE}.ralph/runs/run-001-description/prd.json{C.NC}")
+    print(f"    3. Run {C.SAGE}.ralph/ralph run{C.NC} to start")
+    print()
+
+    return True
+
+
 def cmd_runs(args, project_dir: Path):
     """List all runs."""
     runs_dir = project_dir / ".ralph" / "runs"
@@ -444,42 +757,7 @@ def cmd_run(args, project_dir: Path, prd_file: Path, prd: dict):
         print()
         return
 
-    if not args.yes:
-        print(
-            f"  {C.SKY}─────────────────────────────────────────────────────────{C.NC}"
-        )
-        print()
-        print(f"  {C.YELLOW}Ready to start Ralph loop.{C.NC}")
-        print(
-            f"  {C.DIM}This will run Claude Code up to {args.max_iterations} times.{C.NC}"
-        )
-        print()
-
-        try:
-            reply = input("  Proceed? [y/N] ").strip().lower()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            print()
-            print(f"  {C.PEACH}Cancelled.{C.NC}")
-            print()
-            return
-
-        print()
-
-        if reply not in ("y", "yes"):
-            print(f"  {C.PEACH}Cancelled.{C.NC}")
-            print()
-            return
-
-    # Setup
-    run_dir = get_run_dir(prd_file)
-    if run_dir:
-        progress_file = run_dir / "progress.txt"
-    else:
-        progress_file = project_dir / ".ralph" / "progress.txt"
-    notes_file = project_dir / ".ralph" / "NOTES.md"
-
-    # Check for unverified milestones before continuing
+    # Check for unverified milestones BEFORE asking to proceed
     unverified = get_unverified_milestone(prd)
     if unverified:
         print(
@@ -545,6 +823,42 @@ def cmd_run(args, project_dir: Path, prd_file: Path, prd: dict):
             )
             print()
             return
+
+    # Now ask to proceed (after milestone check)
+    if not args.yes:
+        print(
+            f"  {C.SKY}─────────────────────────────────────────────────────────{C.NC}"
+        )
+        print()
+        print(f"  {C.YELLOW}Ready to start Ralph loop.{C.NC}")
+        print(
+            f"  {C.DIM}This will run Claude Code up to {args.max_iterations} times.{C.NC}"
+        )
+        print()
+
+        try:
+            reply = input("  Proceed? [y/N] ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print()
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+        print()
+
+        if reply not in ("y", "yes"):
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+    # Setup
+    run_dir = get_run_dir(prd_file)
+    if run_dir:
+        progress_file = run_dir / "progress.txt"
+    else:
+        progress_file = project_dir / ".ralph" / "progress.txt"
+    notes_file = project_dir / ".ralph" / "NOTES.md"
 
     # Commit any uncommitted changes
     if git_has_changes(project_dir):
@@ -702,6 +1016,10 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
 
 def print_usage():
     """Print colorful usage information."""
+    project_dir = get_project_dir()
+    project_name = project_dir.name
+    has_ralph = (project_dir / ".ralph").is_dir()
+
     print()
     print(f"{C.SKY}  ┌─────────────────────────────────────────────────────────┐{C.NC}")
     print(
@@ -709,6 +1027,14 @@ def print_usage():
     )
     print(f"{C.SKY}  └─────────────────────────────────────────────────────────┘{C.NC}")
     print()
+    if has_ralph:
+        print(f"  {C.BOLD}{C.LAVENDER}Project:{C.NC} {C.MINT}{project_name}{C.NC}")
+        print(f"  {C.DIM}Path:{C.NC}    {C.SAGE}{project_dir}{C.NC}")
+        print()
+    else:
+        print(f"  {C.CORAL}No .ralph/ directory found in current path{C.NC}")
+        print(f"  {C.DIM}CWD: {project_dir}{C.NC}")
+        print()
     print(
         f"  {C.BOLD}{C.LAVENDER}Usage:{C.NC} ralph {C.DIM}[command] [options]{C.NC}"
     )
@@ -721,6 +1047,9 @@ def print_usage():
         f"    {C.MINT}info{C.NC}            {C.DIM}Show current cycle status and PRD details{C.NC}"
     )
     print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
+    print(
+        f"    {C.MINT}install{C.NC}         {C.DIM}Install ralph in current directory{C.NC}"
+    )
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Options:{C.NC}")
     print(
@@ -746,6 +1075,7 @@ def print_usage():
         f"    {C.SAGE}ralph info{C.NC}         {C.DIM}Show current status{C.NC}"
     )
     print(f"    {C.SAGE}ralph runs{C.NC}         {C.DIM}List all runs{C.NC}")
+    print(f"    {C.SAGE}ralph install{C.NC}      {C.DIM}Install ralph in current dir{C.NC}")
     print()
 
 
@@ -778,7 +1108,12 @@ def main():
 
     command = args.command
 
-    if command == "runs":
+    if command == "install":
+        # Install uses CWD, not detected project_dir (which requires .ralph/)
+        target_dir = Path.cwd()
+        print_header("Install")
+        cmd_install(args, target_dir)
+    elif command == "runs":
         cmd_runs(args, project_dir)
     elif command in ("run", "info"):
         if not prd_file:
