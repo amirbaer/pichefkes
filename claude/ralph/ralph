@@ -1,0 +1,800 @@
+#!/usr/bin/env python3
+"""
+Ralph Loop Runner - Development iteration system for Claude Code.
+
+Runs Claude Code in fresh sessions to complete tasks from a PRD.
+State is stored in .ralph/ directory of each project.
+
+Usage:
+    ralph run      - Execute PRD tasks
+    ralph info     - Show current status
+    ralph runs     - List all runs
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+# ═══════════════════════════════════════════════════════════════════
+# COLORS
+# ═══════════════════════════════════════════════════════════════════
+
+
+class Colors:
+    PINK = "\033[38;5;218m"
+    LAVENDER = "\033[38;5;183m"
+    MINT = "\033[38;5;158m"
+    PEACH = "\033[38;5;216m"
+    SKY = "\033[38;5;117m"
+    CORAL = "\033[38;5;210m"
+    SAGE = "\033[38;5;151m"
+    YELLOW = "\033[38;5;221m"
+    DIM = "\033[2m"
+    BOLD = "\033[1m"
+    NC = "\033[0m"
+
+
+C = Colors
+
+# ═══════════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════════
+
+
+def get_project_dir():
+    """Get project directory from current working directory.
+
+    Walks up from CWD to find a directory containing .ralph/
+    """
+    cwd = Path.cwd()
+
+    # Check CWD first
+    if (cwd / ".ralph").is_dir():
+        return cwd
+
+    # Walk up to find .ralph/
+    for parent in cwd.parents:
+        if (parent / ".ralph").is_dir():
+            return parent
+
+    # Fallback to CWD
+    return cwd
+
+
+def find_prd_file(project_dir: Path) -> Path | None:
+    """Find the active PRD file.
+
+    Searches in order:
+    1. .ralph/runs/run-NNN-*/prd.json with status "active" (newest first)
+    2. Legacy locations: .ralph/prd-*.json, .ralph/prd.json, prd.json
+    """
+    runs_dir = project_dir / ".ralph" / "runs"
+
+    # Check runs folder for active PRDs (newest run number first)
+    if runs_dir.exists():
+        run_dirs = sorted(
+            [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run-")],
+            key=lambda d: d.name,
+            reverse=True,
+        )
+        for run_dir in run_dirs:
+            prd_file = run_dir / "prd.json"
+            if prd_file.exists():
+                try:
+                    prd = load_prd(prd_file)
+                    if prd.get("status") == "active":
+                        return prd_file
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+    # Legacy fallback
+    legacy_candidates = [
+        project_dir / ".ralph" / "prd.json",
+        project_dir / "prd.json",
+    ]
+    for candidate in legacy_candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def get_run_dir(prd_file: Path) -> Path | None:
+    """Get the run directory for a PRD file, if it's in a run folder."""
+    if prd_file.parent.name.startswith("run-"):
+        return prd_file.parent
+    return None
+
+
+def load_prd(prd_file: Path) -> dict:
+    """Load PRD JSON file."""
+    with open(prd_file) as f:
+        return json.load(f)
+
+
+def save_prd(prd_file: Path, prd: dict):
+    """Save PRD JSON file."""
+    with open(prd_file, "w") as f:
+        json.dump(prd, f, indent=2)
+        f.write("\n")
+
+
+def get_prd_title(prd: dict) -> str:
+    """Get PRD title."""
+    return prd.get("title", "Untitled PRD")
+
+
+def count_tasks_by_status(prd: dict) -> dict:
+    """Count tasks by status."""
+    counts = {"open": 0, "completed": 0, "total": 0}
+    for story in prd.get("stories", []):
+        status = story.get("status", "open")
+        counts[status] = counts.get(status, 0) + 1
+        counts["total"] += 1
+    return counts
+
+
+def get_completed_task_ids(prd: dict) -> set:
+    """Get set of completed task IDs."""
+    return {s["id"] for s in prd.get("stories", []) if s.get("status") == "completed"}
+
+
+def deps_met(story: dict, completed_ids: set) -> bool:
+    """Check if all dependencies are met."""
+    for dep in story.get("dependencies", []):
+        if dep not in completed_ids:
+            return False
+    return True
+
+
+def get_open_tasks(prd: dict) -> list:
+    """Get list of open tasks with dependency status."""
+    completed_ids = get_completed_task_ids(prd)
+    tasks = []
+    for story in prd.get("stories", []):
+        if story.get("status") == "open":
+            ready = deps_met(story, completed_ids)
+            tasks.append(
+                {
+                    "id": story["id"],
+                    "title": story["title"],
+                    "ready": ready,
+                }
+            )
+    return tasks
+
+
+def get_next_task(prd: dict) -> dict | None:
+    """Get next available task (open with deps met)."""
+    completed_ids = get_completed_task_ids(prd)
+    for story in prd.get("stories", []):
+        if story.get("status") == "open" and deps_met(story, completed_ids):
+            return story
+    return None
+
+
+def is_milestone_task(task: dict) -> bool:
+    """Check if a task is a milestone (requires manual verification)."""
+    task_id = task.get("id", "")
+    category = task.get("category", "")
+    title = task.get("title", "").lower()
+    return (
+        task_id.startswith("M")
+        or category == "milestone"
+        or "milestone" in title
+    )
+
+
+def get_unverified_milestone(prd: dict) -> dict | None:
+    """Get the first completed milestone that hasn't been verified by user.
+
+    Returns the milestone task dict if found, None otherwise.
+    """
+    for story in prd.get("stories", []):
+        if (
+            story.get("status") == "completed"
+            and is_milestone_task(story)
+            and not story.get("verified", False)
+        ):
+            return story
+    return None
+
+
+def mark_milestone_verified(prd_file: Path, prd: dict, milestone_id: str):
+    """Mark a milestone as verified in the PRD."""
+    for story in prd.get("stories", []):
+        if story["id"] == milestone_id:
+            story["verified"] = True
+            break
+    save_prd(prd_file, prd)
+
+
+def get_cycle_stage(project_dir: Path) -> str:
+    """Get current cycle stage from CYCLE.md."""
+    cycle_file = project_dir / ".ralph" / "CYCLE.md"
+    if not cycle_file.exists():
+        return "Unknown"
+
+    content = cycle_file.read_text()
+    for line in content.split("\n"):
+        if "STAGE" in line and "▶" in line:
+            stage = line.split("▶")[-1].strip()
+            stage = stage.replace("║", "").strip()
+            return stage
+    return "Unknown"
+
+
+def run_command(cmd: list, cwd: Path | None = None, capture: bool = True) -> tuple:
+    """Run a command and return (returncode, stdout, stderr)."""
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=capture,
+        text=True,
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+def git_has_changes(project_dir: Path) -> bool:
+    """Check if there are uncommitted changes."""
+    run_command(["git", "add", "-A", "."], cwd=project_dir)
+    code, _, _ = run_command(["git", "diff", "--staged", "--quiet"], cwd=project_dir)
+    return code != 0
+
+
+def git_commit(project_dir: Path, message: str):
+    """Commit staged changes."""
+    run_command(["git", "add", "-A", "."], cwd=project_dir)
+    run_command(["git", "commit", "-m", message, "--quiet"], cwd=project_dir)
+
+
+def git_rev_parse(project_dir: Path) -> str:
+    """Get current commit hash."""
+    code, stdout, _ = run_command(["git", "rev-parse", "HEAD"], cwd=project_dir)
+    return stdout.strip() if code == 0 else "none"
+
+
+def git_commit_count(project_dir: Path, from_hash: str, to_hash: str) -> int:
+    """Count commits between two hashes."""
+    code, stdout, _ = run_command(
+        ["git", "rev-list", "--count", f"{from_hash}..{to_hash}"], cwd=project_dir
+    )
+    return int(stdout.strip()) if code == 0 else 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DISPLAY
+# ═══════════════════════════════════════════════════════════════════
+
+
+def print_header(project_name: str = ""):
+    """Print the Ralph header."""
+    display_name = project_name or "Ralph"
+    # Pad/truncate to fit the box (11 chars for project name area)
+    display_name = display_name[:11].ljust(11)
+    print()
+    print(f"{C.SKY}  ┌─────────────────────────────────────────────────────────┐{C.NC}")
+    print(
+        f"{C.SKY}  │{C.NC}     {C.PINK}{display_name}{C.NC} {C.DIM}~ Ralph Loop Runner{C.NC}                    {C.SKY}│{C.NC}"
+    )
+    print(f"{C.SKY}  └─────────────────────────────────────────────────────────┘{C.NC}")
+    print()
+
+
+def print_task_list(tasks: list, indent: str = "  "):
+    """Print list of tasks with status indicators."""
+    for task in tasks:
+        indicator = "→" if task["ready"] else "⏸"
+        print(f"{indent}{indicator} {task['id']}: {task['title']}")
+
+
+def print_completed_tasks(prd: dict, indent: str = "    "):
+    """Print completed tasks."""
+    for story in prd.get("stories", []):
+        if story.get("status") == "completed":
+            # Show verification status for milestones
+            if is_milestone_task(story):
+                if story.get("verified", False):
+                    print(f"{indent}{C.MINT}✓{C.NC} {story['id']}: {story['title']} {C.MINT}[verified]{C.NC}")
+                else:
+                    print(f"{indent}{C.YELLOW}⚠{C.NC} {story['id']}: {story['title']} {C.YELLOW}[needs verification]{C.NC}")
+            else:
+                print(f"{indent}✓ {story['id']}: {story['title']}")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# COMMANDS
+# ═══════════════════════════════════════════════════════════════════
+
+
+def cmd_runs(args, project_dir: Path):
+    """List all runs."""
+    runs_dir = project_dir / ".ralph" / "runs"
+
+    if not runs_dir.exists() or not any(runs_dir.iterdir()):
+        print(f"  {C.DIM}No runs found{C.NC}")
+        print()
+        return
+
+    print(f"  {C.BOLD}{C.LAVENDER}All Runs{C.NC}")
+    print()
+
+    run_dirs = sorted(
+        [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run-")],
+        key=lambda d: d.name,
+    )
+
+    for i, run_dir in enumerate(run_dirs, 1):
+        prd_file = run_dir / "prd.json"
+        if prd_file.exists():
+            try:
+                run_prd = load_prd(prd_file)
+                status = run_prd.get("status", "unknown")
+                title = run_prd.get("title", "Untitled")
+                counts = count_tasks_by_status(run_prd)
+
+                if status == "active":
+                    indicator = f"{C.MINT}● active{C.NC}"
+                elif status == "completed":
+                    indicator = f"{C.SAGE}✓ done{C.NC}"
+                else:
+                    indicator = f"{C.DIM}○ {status}{C.NC}"
+
+                print(f"  {C.PINK}{i}{C.NC}  {C.SKY}{run_dir.name}{C.NC}  {indicator}")
+                print(f"       {C.SAGE}{title}{C.NC}")
+                print(
+                    f"       {C.DIM}{counts['completed']}/{counts['total']} tasks completed{C.NC}"
+                )
+                print()
+            except Exception:
+                print(
+                    f"  {C.PINK}{i}{C.NC}  {C.SKY}{run_dir.name}{C.NC}  {C.CORAL}(error reading PRD){C.NC}"
+                )
+                print()
+
+    print(
+        f"  {C.DIM}View details:{C.NC} {C.SAGE}ralph show <index|name>{C.NC}"
+    )
+    print()
+
+
+def cmd_info(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Show current cycle status and PRD details."""
+    counts = count_tasks_by_status(prd)
+
+    print(f"  {C.BOLD}{C.LAVENDER}Current Cycle{C.NC}")
+    print()
+
+    stage = get_cycle_stage(project_dir)
+    print(f"  {C.DIM}Stage{C.NC}         {C.MINT}{stage}{C.NC}")
+    print(f"  {C.DIM}PRD{C.NC}           {C.SAGE}{get_prd_title(prd)}{C.NC}")
+    print(
+        f"  {C.DIM}File{C.NC}          {C.SAGE}{prd_file.relative_to(project_dir)}{C.NC}"
+    )
+    print(
+        f"  {C.DIM}Progress{C.NC}      {C.SAGE}{counts['completed']}{C.NC}{C.DIM}/{C.NC}{C.SAGE}{counts['total']}{C.NC} {C.DIM}tasks completed{C.NC}"
+    )
+    print()
+
+    print(f"  {C.BOLD}{C.LAVENDER}Tasks{C.NC}")
+    print()
+
+    if counts["completed"] > 0:
+        print(f"  {C.DIM}Completed:{C.NC}")
+        print_completed_tasks(prd)
+        print()
+
+    open_tasks = get_open_tasks(prd)
+    if open_tasks:
+        ready_count = sum(1 for t in open_tasks if t["ready"])
+        print(
+            f"  {C.DIM}Open:{C.NC} {C.DIM}({ready_count} ready, {len(open_tasks) - ready_count} blocked){C.NC}"
+        )
+        for task in open_tasks:
+            indicator = "→" if task["ready"] else "⏸"
+            print(f"    {indicator} {task['id']}: {task['title']}")
+        print()
+
+    notes_file = project_dir / ".ralph" / "NOTES.md"
+    if notes_file.exists():
+        print(f"  {C.DIM}See notes:{C.NC} {C.SAGE}cat .ralph/NOTES.md{C.NC}")
+        print()
+
+
+def cmd_run(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Run the Ralph loop."""
+    counts = count_tasks_by_status(prd)
+    open_tasks = get_open_tasks(prd)
+    next_task = get_next_task(prd)
+
+    print(f"  {C.BOLD}{C.LAVENDER}PRD:{C.NC} {C.SAGE}{get_prd_title(prd)}{C.NC}")
+    print(f"  {C.DIM}File:{C.NC} {C.SAGE}{prd_file.relative_to(project_dir)}{C.NC}")
+    print()
+    print(f"  {C.BOLD}{C.LAVENDER}Configuration:{C.NC}")
+    print(f"  {C.DIM}Project{C.NC}       {C.SAGE}{project_dir}{C.NC}")
+    print(f"  {C.DIM}Max iters{C.NC}     {C.SAGE}{args.max_iterations}{C.NC}")
+    print(f"  {C.DIM}Tasks open{C.NC}    {C.SAGE}{counts['open']}{C.NC}")
+    print()
+
+    if counts["open"] == 0:
+        print(f"  {C.MINT}✓ All tasks already complete!{C.NC}")
+        print()
+        return
+
+    ready_tasks = [t for t in open_tasks if t["ready"]]
+    print(
+        f"  {C.BOLD}{C.LAVENDER}Ready Tasks:{C.NC} {C.DIM}({len(ready_tasks)} ready to execute){C.NC}"
+    )
+    for task in ready_tasks[:5]:
+        print(f"    → {task['id']}: {task['title']}")
+    if len(ready_tasks) > 5:
+        print(f"    {C.DIM}... and {len(ready_tasks) - 5} more{C.NC}")
+    print()
+
+    if next_task:
+        print(f"  {C.BOLD}{C.YELLOW}First task to execute:{C.NC}")
+        print(f"  {C.MINT}▸ {next_task['id']}{C.NC} {C.SAGE}{next_task['title']}{C.NC}")
+        print()
+    else:
+        print(f"  {C.CORAL}✗ No tasks available (check dependencies){C.NC}")
+        print()
+        return
+
+    if not args.yes:
+        print(
+            f"  {C.SKY}─────────────────────────────────────────────────────────{C.NC}"
+        )
+        print()
+        print(f"  {C.YELLOW}Ready to start Ralph loop.{C.NC}")
+        print(
+            f"  {C.DIM}This will run Claude Code up to {args.max_iterations} times.{C.NC}"
+        )
+        print()
+
+        try:
+            reply = input("  Proceed? [y/N] ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print()
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+        print()
+
+        if reply not in ("y", "yes"):
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+    # Setup
+    run_dir = get_run_dir(prd_file)
+    if run_dir:
+        progress_file = run_dir / "progress.txt"
+    else:
+        progress_file = project_dir / ".ralph" / "progress.txt"
+    notes_file = project_dir / ".ralph" / "NOTES.md"
+
+    # Check for unverified milestones before continuing
+    unverified = get_unverified_milestone(prd)
+    if unverified:
+        print(
+            f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
+        )
+        print()
+        print(f"  {C.YELLOW}{C.BOLD}🛑 UNVERIFIED MILESTONE: {unverified['id']}{C.NC}")
+        print(f"  {C.SAGE}{unverified['title']}{C.NC}")
+        print()
+        print(f"  {C.DIM}This milestone was completed but not yet verified.{C.NC}")
+        print(f"  {C.DIM}Please review before continuing.{C.NC}")
+        print()
+        print(f"  {C.MINT}Milestone description:{C.NC}")
+        # Show first few lines of description
+        desc_lines = unverified.get("description", "").split("\\n")[:15]
+        for line in desc_lines:
+            print(f"  {C.DIM}{line}{C.NC}")
+        if len(unverified.get("description", "").split("\\n")) > 15:
+            print(f"  {C.DIM}...{C.NC}")
+        print()
+        print(f"  {C.MINT}To view full details:{C.NC}")
+        print(
+            f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | grep -A 100 '\"id\": \"{unverified['id']}\"'{C.NC}"
+        )
+        print()
+        print(
+            f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
+        )
+        print()
+        try:
+            reply = input(
+                f"  {C.YELLOW}Mark milestone {unverified['id']} as verified and continue? [y/N]{C.NC} "
+            ).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print()
+            print(
+                f"  {C.PEACH}Paused. Verify milestone and run '.ralph/ralph run' to continue.{C.NC}"
+            )
+            print()
+            return
+
+        if reply not in ("y", "yes"):
+            print()
+            print(
+                f"  {C.PEACH}Paused. Verify milestone and run '.ralph/ralph run' to continue.{C.NC}"
+            )
+            print()
+            return
+
+        # Mark milestone as verified
+        mark_milestone_verified(prd_file, prd, unverified["id"])
+        print()
+        print(f"  {C.MINT}✓ Milestone {unverified['id']} marked as verified{C.NC}")
+        print()
+
+        # Check if there are more unverified milestones
+        prd = load_prd(prd_file)
+        next_unverified = get_unverified_milestone(prd)
+        if next_unverified:
+            print(
+                f"  {C.PEACH}Note: There are more unverified milestones. Run again to verify.{C.NC}"
+            )
+            print()
+            return
+
+    # Commit any uncommitted changes
+    if git_has_changes(project_dir):
+        print(f"  {C.PEACH}Found uncommitted changes from previous run{C.NC}")
+        git_commit(
+            project_dir,
+            "[ralph] Recover uncommitted changes from previous run\n\n"
+            "Co-Authored-By: Claude <noreply@anthropic.com>",
+        )
+        print(f"  {C.MINT}✓ Previous changes committed{C.NC}")
+        print()
+
+    # Main loop
+    for i in range(1, args.max_iterations + 1):
+        prd = load_prd(prd_file)
+        counts = count_tasks_by_status(prd)
+        next_task = get_next_task(prd)
+
+        print(
+            f"  {C.SKY}─────────────────────────────────────────────────────────{C.NC}"
+        )
+        print()
+        print(
+            f"  {C.LAVENDER}Iteration {C.PINK}{i}{C.LAVENDER} of {C.PINK}{args.max_iterations}{C.NC}    {C.DIM}remaining: {counts['open']} tasks{C.NC}"
+        )
+
+        if counts["open"] == 0:
+            print(f"  {C.MINT}✓ All tasks complete{C.NC}")
+            print()
+            break
+
+        if not next_task:
+            print(f"  {C.CORAL}✗ No available tasks (check dependencies){C.NC}")
+            print()
+            break
+
+        print(f"  {C.MINT}▸ {next_task['id']}{C.NC} {C.SAGE}{next_task['title']}{C.NC}")
+        print()
+
+        start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_before = git_rev_parse(project_dir)
+
+        prd_title = get_prd_title(prd)
+        prompt = f"""You are working on a development project managed by Ralph.
+
+## Project: {project_dir.name}
+## PRD: {prd_title}
+
+## Instructions
+
+1. Read the PRD file: {prd_file}
+2. Read progress file: {progress_file}
+3. Read notes file: {notes_file} (important user constraints and project context!)
+4. Find the FIRST task with status "open" whose dependencies are all "completed"
+5. Work on that ONE task completely
+6. When done:
+   - Update the PRD: change the task's status from "open" to "completed"
+   - Append to progress.txt what you did, including:
+     - Task ID and title
+     - What was accomplished
+     - Any files created/modified
+     - Any issues encountered
+   - Make sure all your work is saved to files
+
+## Important Rules
+
+- Complete ONE task per iteration, then stop
+- Read NOTES.md for user constraints and project context
+- Create all necessary directories and files
+- Write working, tested code
+- Update both the PRD AND progress.txt before finishing
+- If a task cannot be completed, document why in progress.txt and move on
+- MILESTONE tasks (IDs starting with M): These are verification checkpoints.
+  Mark them complete after documenting in progress.txt what was built and
+  noting that manual verification is recommended.
+
+Start by reading the PRD, progress, and notes files, then work on the next available task.
+"""
+
+        print(f"  {C.DIM}Claude is working on task {next_task['id']}...{C.NC}")
+
+        subprocess.run(
+            ["claude", "--print", "--dangerously-skip-permissions", str(project_dir)],
+            input=prompt,
+            capture_output=True,
+            text=True,
+        )
+
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  {C.DIM}Completed at {end_time}{C.NC}")
+        print()
+
+        commit_after = git_rev_parse(project_dir)
+
+        if commit_before != commit_after and commit_before != "none":
+            commits_made = git_commit_count(project_dir, commit_before, commit_after)
+            print(f"  {C.MINT}✓ Claude made {commits_made} commit(s){C.NC}")
+
+        if git_has_changes(project_dir):
+            git_commit(
+                project_dir,
+                f"[ralph] Iteration {i}: {next_task['title']}\n\n"
+                f"Task: {next_task['id']}\n"
+                f"Time: {start_time} - {end_time}\n\n"
+                "Co-Authored-By: Claude <noreply@anthropic.com>",
+            )
+            print(f"  {C.MINT}✓ Additional changes committed{C.NC}")
+        elif commit_before == commit_after:
+            print(f"  {C.PEACH}○ No changes{C.NC}")
+
+        print()
+
+        # Check if we just completed a milestone - pause for manual verification
+        prd = load_prd(prd_file)
+        task_now = next((s for s in prd.get("stories", []) if s["id"] == next_task["id"]), None)
+        if task_now and task_now.get("status") == "completed" and is_milestone_task(next_task):
+            print(
+                f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
+            )
+            print()
+            print(f"  {C.YELLOW}{C.BOLD}🛑 MILESTONE REACHED: {next_task['id']}{C.NC}")
+            print(f"  {C.SAGE}{next_task['title']}{C.NC}")
+            print()
+            print(f"  {C.DIM}Ralph has paused for manual verification.{C.NC}")
+            print(f"  {C.DIM}Review the milestone and run '.ralph/ralph run' when ready.{C.NC}")
+            print()
+            print(f"  {C.MINT}To view milestone details:{C.NC}")
+            print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | grep -A 100 '\"id\": \"{next_task['id']}\"'{C.NC}")
+            print()
+            print(
+                f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
+            )
+            print()
+            # Don't prompt here - user will run ralph again and be prompted to verify
+            return
+
+        time.sleep(1)
+
+    prd = load_prd(prd_file)
+    counts = count_tasks_by_status(prd)
+
+    print(f"  {C.SKY}─────────────────────────────────────────────────────────{C.NC}")
+    print()
+    print(f"  {C.LAVENDER}Loop complete{C.NC}")
+    print(
+        f"  {C.DIM}Iterations:{C.NC} {C.SAGE}{i}{C.NC}    {C.DIM}Remaining:{C.NC} {C.SAGE}{counts['open']}{C.NC}"
+    )
+    print()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════
+
+
+def print_usage():
+    """Print colorful usage information."""
+    print()
+    print(f"{C.SKY}  ┌─────────────────────────────────────────────────────────┐{C.NC}")
+    print(
+        f"{C.SKY}  │{C.NC}     {C.PINK}Ralph{C.NC}       {C.DIM}~ Development Loop Runner{C.NC}              {C.SKY}│{C.NC}"
+    )
+    print(f"{C.SKY}  └─────────────────────────────────────────────────────────┘{C.NC}")
+    print()
+    print(
+        f"  {C.BOLD}{C.LAVENDER}Usage:{C.NC} ralph {C.DIM}[command] [options]{C.NC}"
+    )
+    print()
+    print(f"  {C.BOLD}{C.LAVENDER}Commands:{C.NC}")
+    print(
+        f"    {C.MINT}run{C.NC}             {C.DIM}Run the iteration loop (execute PRD tasks){C.NC}"
+    )
+    print(
+        f"    {C.MINT}info{C.NC}            {C.DIM}Show current cycle status and PRD details{C.NC}"
+    )
+    print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
+    print()
+    print(f"  {C.BOLD}{C.LAVENDER}Options:{C.NC}")
+    print(
+        f"    {C.MINT}-y, --yes{C.NC}       {C.DIM}Skip confirmation prompt (for run){C.NC}"
+    )
+    print(
+        f"    {C.MINT}-n, --max{C.NC} N     {C.DIM}Max iterations (default: 20){C.NC}"
+    )
+    print(f"    {C.MINT}-h, --help{C.NC}      {C.DIM}Show this help{C.NC}")
+    print()
+    print(f"  {C.BOLD}{C.LAVENDER}Examples:{C.NC}")
+    print(f"    {C.SAGE}ralph{C.NC}              {C.DIM}Show this help{C.NC}")
+    print(
+        f"    {C.SAGE}ralph run{C.NC}          {C.DIM}Run the iteration loop{C.NC}"
+    )
+    print(
+        f"    {C.SAGE}ralph run -y{C.NC}       {C.DIM}Run without confirmation{C.NC}"
+    )
+    print(
+        f"    {C.SAGE}ralph run -n 10{C.NC}    {C.DIM}Run up to 10 iterations{C.NC}"
+    )
+    print(
+        f"    {C.SAGE}ralph info{C.NC}         {C.DIM}Show current status{C.NC}"
+    )
+    print(f"    {C.SAGE}ralph runs{C.NC}         {C.DIM}List all runs{C.NC}")
+    print()
+
+
+def main():
+    if len(sys.argv) == 1 or sys.argv[1] in ("-h", "--help"):
+        print_usage()
+        sys.exit(0)
+
+    parser = argparse.ArgumentParser(
+        description="metrics-dsl Ralph Loop Runner",
+        add_help=False,
+    )
+
+    parser.add_argument("command", nargs="?", default=None)
+    parser.add_argument("-y", "--yes", action="store_true")
+    parser.add_argument("-n", "--max", type=int, default=20, dest="max_iterations")
+    parser.add_argument("-h", "--help", action="store_true")
+
+    args = parser.parse_args()
+
+    if args.help:
+        print_usage()
+        sys.exit(0)
+
+    project_dir = get_project_dir()
+    project_name = project_dir.name
+    prd_file = find_prd_file(project_dir)
+
+    print_header(project_name)
+
+    command = args.command
+
+    if command == "runs":
+        cmd_runs(args, project_dir)
+    elif command in ("run", "info"):
+        if not prd_file:
+            print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
+            print(f"  {C.DIM}Looked for: .ralph/runs/run-*/prd.json (active){C.NC}")
+            print()
+            sys.exit(1)
+        prd = load_prd(prd_file)
+        if command == "run":
+            cmd_run(args, project_dir, prd_file, prd)
+        else:
+            cmd_info(args, project_dir, prd_file, prd)
+    else:
+        print_usage()
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
