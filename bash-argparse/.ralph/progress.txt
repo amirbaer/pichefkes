@@ -1,0 +1,777 @@
+# Progress Log
+
+_This file is automatically updated after each Ralph iteration._
+
+---
+
+## Task 001: Create core library structure with simple sourcing
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Created `bashargparse.sh` as the main library file
+- Implemented simple single-command sourcing: `source bashargparse.sh`
+- Set up internal state variables for storing argument definitions:
+  - Parser metadata (`_ARGPARSE_PROG`, `_ARGPARSE_DESCRIPTION`)
+  - Parallel arrays for argument properties (short, long, positional, help, default, required, type, choices, action, nargs, dest)
+  - Positional arguments order tracking
+- Added multiple-sourcing prevention
+- Added version constant (`BASHARGPARSE_VERSION`)
+- Included helper functions: `_argparse_to_varname()` and `_argparse_reset()`
+
+### Files created/modified
+- **Created:** `bashargparse.sh` - Main library file (71 lines)
+
+### Testing performed
+- Verified library sources without errors
+- Verified internal state arrays are properly initialized
+- Verified multiple-sourcing prevention works
+
+### Issues encountered
+- None
+
+---
+
+## Task 002: Implement argparse_init function
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `argparse_init()` function in bashargparse.sh
+- Function accepts optional program name and description arguments
+- Program name defaults to script name (`basename ${BASH_SOURCE[-1]}`) if not provided
+- Description defaults to empty string if not provided
+- Re-initialization properly resets all internal state via `_argparse_reset()`
+
+### API
+```bash
+argparse_init [program_name] [description]
+
+# Examples:
+argparse_init 'myprogram' 'A tool for processing files'
+argparse_init 'mytool'  # description will be empty
+argparse_init           # uses script name, empty description
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added argparse_init function (now ~100 lines)
+
+### Testing performed
+- Verified argparse_init with both arguments sets them correctly
+- Verified argparse_init with only program name works
+- Verified argparse_init with no arguments defaults to script name
+- Verified re-initialization resets state (arg count returns to 0)
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 003: Implement add_argument for boolean flags
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `add_argument()` function in bashargparse.sh
+- Supports boolean flags with `store_true` action (default action)
+- Supports both short (`-s v`) and long (`-l verbose`) flag definitions
+- Supports help text via `-h` or `--help` option
+- Automatically generates destination variable name from flag name
+  - Long flag has priority over short flag for naming
+  - Converts to uppercase and replaces hyphens with underscores
+  - Example: `--dry-run` → `DRY_RUN`
+- Default value for `store_true` is `0` (will be `1` when flag is present)
+- Validates that at least short or long flag is provided
+- Stores argument definitions in parallel arrays for later parsing
+
+### API
+```bash
+add_argument [options]
+
+Options:
+  -s, --short FLAG     Short flag (without dash, e.g., 'v' for -v)
+  -l, --long FLAG      Long flag (without dashes, e.g., 'verbose' for --verbose)
+  -h, --help TEXT      Help text for this argument
+  -d, --default VALUE  Default value (default: 0 for store_true)
+  -a, --action ACTION  Action: store_true (default for boolean flags)
+
+# Examples:
+add_argument -s v -l verbose -h 'Enable verbose mode'
+add_argument --short f --long force --help 'Force operation'
+add_argument -l debug -h 'Enable debug mode'
+add_argument -s q -h 'Quiet mode'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added add_argument function (now ~195 lines)
+
+### Testing performed
+- Verified add_argument with both short and long flags works
+- Verified add_argument with only short flag works
+- Verified add_argument with only long flag works
+- Verified long-form option syntax (--short, --long, --help) works
+- Verified destination variable naming from flag names
+- Verified hyphenated flag names convert correctly (dry-run → DRY_RUN)
+- Verified error handling when no flags are provided
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 004: Implement add_argument for value flags
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Extended `add_argument()` to support flags that take values via the `store` action
+- Changed default action from `store_true` to `store` (value flags are the default now)
+- Boolean flags now require explicit `-a store_true` to be set
+- Added tracking for whether default was explicitly set (`default_was_set` flag)
+- Default behavior:
+  - `store` action: default is empty string (unless explicitly provided via `-d`)
+  - `store_true` action: default is `0`
+
+### API
+```bash
+# For value flags (store action - now the default):
+add_argument -s o -l output -d '/tmp/out' -h 'Output file'
+add_argument -l config -h 'Config file path'  # default is empty
+add_argument --long port --default "8080" --help "Port number"
+
+# For boolean flags (store_true action - explicit):
+add_argument -s v -l verbose -a store_true -h 'Enable verbose mode'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Extended add_argument function (now ~215 lines)
+
+### Testing performed
+- Verified value flag with default sets correct values (`DEFAULT: /tmp/out`, `ACTION: store`)
+- Verified value flag without default has empty string default
+- Verified boolean flag with `store_true` still works (default: 0)
+- Verified multiple argument types can coexist
+- Verified long-form option syntax works (`--default`, `--help`, etc.)
+- Verified explicit empty default works correctly
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 005: Implement add_argument for positional arguments
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Extended `add_argument()` to support positional arguments via `-p/--positional` option
+- Positional arguments are defined without dash prefix in the parser
+- Added validation to prevent mixing positional with short/long flags
+- Added validation to prevent `store_true` action on positional arguments
+- Positional arguments tracked in `_ARGPARSE_POSITIONAL_ORDER` array for correct parsing order
+- Destination variable names follow same convention (uppercase, hyphens to underscores)
+- Support for default values on positional arguments
+
+### API
+```bash
+# For positional arguments:
+add_argument -p filename -h 'Input file to process'
+add_argument --positional output_dir --help 'Output directory'
+add_argument -p config -d 'default.conf' -h 'Config file with default'
+
+# Multiple positional arguments (order matters):
+add_argument -p source -h 'Source file'
+add_argument -p destination -h 'Destination file'
+
+# Mix with flags:
+add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+add_argument -p input -h 'Input file'
+add_argument -l output -d '/tmp/out' -h 'Output path'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Extended add_argument function to support `-p/--positional` option (now ~250 lines)
+
+### Testing performed
+- Verified basic positional argument creation works
+- Verified long-form option syntax (`--positional`) works
+- Verified multiple positional arguments are tracked in order
+- Verified mix of flags and positional arguments works correctly
+- Verified positional with default value works
+- Verified error when combining positional with short flag
+- Verified error when combining positional with long flag
+- Verified error when using store_true with positional
+- Verified error when no flag/positional specified
+- Verified underscores and hyphens in names convert correctly to variable names
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 006: Implement argparse_parse function
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `argparse_parse()` function in bashargparse.sh
+- Function parses command line arguments passed as `"$@"`
+- Initializes all arguments with their default values before parsing
+- Handles boolean flags (`store_true` action) - sets ARG_* to 1 when flag is present
+- Handles value flags (`store` action) - sets ARG_* to the provided value
+- Handles positional arguments in order of definition
+- Supports mixing flags and positional arguments in any order
+- Reports errors for:
+  - Unknown flags/options
+  - Value flags missing their value argument
+- Result variables are accessible as `$ARG_<DEST>` where DEST is derived from the argument name
+  - Example: `--verbose` → `$ARG_VERBOSE`, `--output-dir` → `$ARG_OUTPUT_DIR`
+
+### API
+```bash
+argparse_parse "$@"
+
+# Example usage:
+argparse_init 'myprogram' 'A demo program'
+add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+add_argument -l output -d '/tmp/out' -h 'Output file'
+add_argument -p filename -h 'Input file'
+argparse_parse "$@"
+
+# Result variables available:
+# $ARG_VERBOSE  - 0 or 1
+# $ARG_OUTPUT   - value or default
+# $ARG_FILENAME - positional argument value
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added argparse_parse function (now ~350 lines)
+
+### Testing performed
+- Verified boolean flag with no args uses default (0)
+- Verified boolean flag with short flag (-v) sets to 1
+- Verified boolean flag with long flag (--verbose) sets to 1
+- Verified value flag uses default when not provided
+- Verified value flag with short flag (-o value) sets value
+- Verified value flag with long flag (--output value) sets value
+- Verified single positional argument works
+- Verified positional argument with default works
+- Verified multiple positional arguments are assigned in order
+- Verified mixed flags and positionals work correctly
+- Verified positionals before and after flags work correctly
+- Verified hyphenated flag names convert to valid variable names (--dry-run → ARG_DRY_RUN)
+- Verified unknown flag error handling
+- Verified missing value error handling for value flags
+- Verified compatibility with `set -e` scripts (fixed arithmetic operations)
+- Verified bash syntax check passes
+
+### Issues encountered
+- Initial implementation had incompatibility with `set -e` scripts due to `(( ))` arithmetic returning exit code 1 when result is 0. Fixed by using `$(( ))` assignment syntax instead.
+
+---
+
+## Task 007: Implement automatic --help generation
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Implemented `argparse_help()` function that generates nicely formatted help output
+- Auto-registered `-h` and `--help` flags that are handled automatically by `argparse_parse()`
+- Help display includes:
+  - Usage line with program name, `[options]` indicator, and positional arguments
+  - Program description (if provided)
+  - Positional arguments section with names, help text, and defaults
+  - Options section with all flags, showing `-h, --help` first
+  - Default values shown for `store` action arguments
+  - VALUE placeholder shown for flags that take values
+- After displaying help, the script exits with code 0
+- Help flags are processed before any other argument parsing
+
+### API
+```bash
+# Help is automatic - just define your arguments and call parse:
+argparse_init 'myprogram' 'A demo program'
+add_argument -s v -l verbose -a store_true -h 'Verbose mode'
+add_argument -l output -d '/tmp/out' -h 'Output file'
+add_argument -p filename -h 'Input file'
+argparse_parse "$@"
+
+# Running with --help or -h shows:
+# usage: myprogram [options] filename
+#
+# A demo program
+#
+# positional arguments:
+#   filename            Input file
+#
+# options:
+#   -h, --help          show this help message and exit
+#   -v, --verbose       Verbose mode
+#   --output VALUE      Output file (default: /tmp/out)
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `argparse_help()` function and help flag handling in `argparse_parse()` (now ~460 lines)
+
+### Testing performed
+- Verified `--help` flag displays formatted help and exits
+- Verified `-h` short flag works identically
+- Verified help output includes usage line with program name and positional args
+- Verified help output shows description when provided
+- Verified positional arguments section displays correctly with help text and defaults
+- Verified options section always appears (since -h/--help is always available)
+- Verified user-defined flags appear after -h, --help in options section
+- Verified VALUE placeholder appears for store action flags
+- Verified default values are shown for store action flags
+- Verified normal argument parsing still works after help implementation
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 008: Implement required flag validation
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-r/--required` option to `add_argument()` function
+- Implemented required argument tracking during parsing
+- Added validation after parsing to check all required arguments are provided
+- Created `_argparse_usage()` helper function to display short usage line for error messages
+- Error messages follow Python argparse style: "error: the following argument is required: --name"
+- Updated help output to show "(required)" instead of "(default: ...)" for required arguments
+- Works for both flags (value flags, boolean flags) and positional arguments
+
+### API
+```bash
+# Required value flags:
+add_argument -l config -r -h 'Config file (required)'
+add_argument --long output --required --help 'Output file (required)'
+
+# Required positional arguments:
+add_argument -p filename -r -h 'Input file (required)'
+
+# Multiple required args can be defined:
+add_argument -l config -r -h 'Config file'
+add_argument -l output -r -h 'Output file'
+add_argument -p input -r -h 'Input file'
+
+# When required args are missing:
+# usage: prog [options] input
+# prog: error: the following argument is required: --config
+# prog: error: the following argument is required: --output
+# prog: error: the following argument is required: input
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `-r/--required` option parsing, `_argparse_usage()` helper, required validation in `argparse_parse()`, and "(required)" display in help output (now ~510 lines)
+
+### Testing performed
+- Verified required value flag detection when missing
+- Verified required value flag works when provided
+- Verified required positional argument detection when missing
+- Verified required positional argument works when provided
+- Verified multiple required arguments all reported when missing
+- Verified multiple required arguments work when all provided
+- Verified short-flag-only required arguments work
+- Verified help output shows "(required)" for required args
+- Verified compatibility with `set -e` scripts
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 009: Implement type validation (int)
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-t/--type` option to `add_argument()` function
+- Supports two type values: `string` (default) and `int`
+- Added `_argparse_is_int()` helper function that validates integer values
+  - Accepts positive integers, negative integers (with `-`), and positive sign integers (with `+`)
+  - Rejects floats, strings, and other non-integer values
+- Implemented type validation during parsing in `argparse_parse()`:
+  - Validates value flags when using `store` action
+  - Validates positional arguments
+- Error messages follow Python argparse style: "error: argument --flag: invalid int value: 'value'"
+- Added validation to prevent combining `int` type with `store_true` action (makes no sense)
+- Added validation to reject unknown type values (only `string` and `int` are allowed)
+
+### API
+```bash
+# Integer flags:
+add_argument -l port -t int -d '8080' -h 'Port number'
+add_argument -s n -l count -t int -r -h 'Count (required)'
+
+# Integer positional arguments:
+add_argument -p count -t int -h 'Number of items'
+
+# Validation errors look like:
+# usage: prog [options]
+# prog: error: argument --port: invalid int value: 'abc'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `-t/--type` option parsing, `_argparse_is_int()` helper, type validation in `argparse_parse()` (now ~560 lines)
+
+### Testing performed
+- Verified default int value works correctly
+- Verified explicit int values are accepted (positive, negative, zero, with +/- signs)
+- Verified invalid values (strings, floats) are rejected
+- Verified positional arguments with int type work
+- Verified short flags with int type work
+- Verified invalid type specification is rejected
+- Verified int type with store_true is rejected
+- Verified help output still works correctly
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 010: Implement choices validation
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-c/--choices` option to `add_argument()` function for specifying allowed values
+- Choices are specified as a comma-separated list (e.g., `'debug,info,warn,error'`)
+- Implemented `_argparse_in_choices()` helper function that validates values against choices
+- Added choices validation during parsing in `argparse_parse()`:
+  - Validates value flags when using `store` action
+  - Validates positional arguments
+- Error messages follow Python argparse style: "error: argument --flag: invalid choice: 'value' (choose from: choices)"
+- Added validation to prevent combining choices with `store_true` action (makes no sense)
+- Updated help output to display available choices for both flags and positional arguments
+  - Shows "(choices: a,b,c)" instead of "(default: ...)" when choices are defined
+
+### API
+```bash
+# Flags with choices:
+add_argument -l level -c 'debug,info,warn,error' -h 'Log level'
+add_argument -s f -l format -c 'json,xml,csv' -h 'Output format'
+
+# Positional arguments with choices:
+add_argument -p action -c 'start,stop,restart' -h 'Action to perform'
+
+# Validation errors look like:
+# usage: prog [options] action
+# prog: error: argument --level: invalid choice: 'invalid' (choose from: debug,info,warn,error)
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added `-c/--choices` option parsing, `_argparse_in_choices()` helper, choices validation in `argparse_parse()`, and choices display in `argparse_help()` (now ~610 lines)
+
+### Testing performed
+- Verified valid choice for flag is accepted
+- Verified invalid choice for flag is rejected with proper error message
+- Verified valid choice for positional argument is accepted
+- Verified invalid choice for positional argument is rejected
+- Verified choices are displayed in help output for both flags and positionals
+- Verified choices with store_true is correctly rejected
+- Verified short flags with choices work correctly
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 011: Implement count action for flags
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `count` action to `add_argument()` function
+- Implemented counter increment in `argparse_parse()` for each flag occurrence
+- Added support for combined short flags like `-vvv` (counts as 3)
+- Default value for count action is `0` (before any flags seen)
+- Combined flags work by detecting repeated identical characters after `-`
+- Help output shows count flags without VALUE placeholder (like store_true)
+- Added validation to prevent combining count action with:
+  - `type=int` (count action doesn't take values)
+  - `choices` validation (count action doesn't take values)
+
+### API
+```bash
+# Count action - flag can be repeated:
+add_argument -s v -l verbose -a count -h 'Verbosity level'
+
+# Usage examples:
+# prog -v              → ARG_VERBOSE=1
+# prog -v -v -v        → ARG_VERBOSE=3
+# prog -vvv            → ARG_VERBOSE=3 (combined form)
+# prog -vvv -v         → ARG_VERBOSE=4 (mixed)
+# prog --verbose       → ARG_VERBOSE=1
+# prog -vv --verbose   → ARG_VERBOSE=3
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added count action support (~670 lines)
+  - Updated add_argument documentation and validation
+  - Added count action handling in argparse_parse
+  - Added combined short flag expansion (-vvv)
+
+### Testing performed
+- Verified separate flags increment counter (-v -v -v = 3)
+- Verified combined short flags work (-vvv = 3)
+- Verified long flags increment counter (--verbose --verbose = 2)
+- Verified mixed flags work correctly (-v --verbose -v = 3)
+- Verified default is 0 when no flags provided
+- Verified combined plus single flags work (-vvv -v = 4)
+- Verified count with only short flag defined
+- Verified count with only long flag defined
+- Verified help output shows flags without VALUE
+- Verified type=int with count is rejected
+- Verified choices with count is rejected
+- Verified count works alongside other flag types (store, store_true)
+- Verified combined store_true flags work (-fff just sets to 1)
+- All regression tests pass (existing functionality intact)
+- Verified bash syntax check passes
+
+### Issues encountered
+- Initial regex pattern using backreference (`\1`) doesn't work in bash regex
+- Fixed by using explicit character comparison loop to detect repeated characters
+
+---
+
+## Task 012: Implement nargs for multiple values
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added `-n/--nargs` option to `add_argument()` function
+- Supports three nargs values:
+  - `+` (one or more values, requires at least one)
+  - `*` (zero or more values, allows empty)
+  - Positive integers (e.g., `3` for exactly 3 values)
+- Implemented nargs handling for flags in `argparse_parse()`:
+  - Collects consecutive non-flag arguments for `+` and `*`
+  - Stops when hitting another flag (starts with `-`)
+  - Validates minimum one value for `+` nargs
+  - Validates exact count for numeric nargs
+- Implemented nargs handling for positional arguments:
+  - `+` and `*` consume all remaining positional values
+  - Numeric nargs consume exactly N values
+- Results stored as space-separated strings (e.g., `ARG_FILES='a.txt b.txt c.txt'`)
+- Updated help output:
+  - Shows `VALUE [VALUE...]` for nargs `+`
+  - Shows `[VALUE...]` for nargs `*`
+  - Shows multiple `VALUE` placeholders for numeric nargs
+  - Usage line shows `name [name...]` for positional with `+`, `[name...]` for `*`
+- Added validation:
+  - Invalid nargs values are rejected (must be `+`, `*`, or positive integer)
+  - nargs cannot be combined with `store_true` or `count` actions
+- Type validation (`int`) works with nargs - validates each value
+- Choices validation works with nargs - validates each value against choices
+
+### API
+```bash
+# Flags with nargs:
+add_argument -l files -n '+' -h 'One or more files'      # --files a b c
+add_argument -l items -n '*' -h 'Zero or more items'     # --items (optionally followed by values)
+add_argument -l coords -n 3 -h 'Exactly 3 coordinates'   # --coords x y z
+
+# Positional arguments with nargs:
+add_argument -p inputs -n '+' -h 'One or more input files'
+add_argument -p extras -n '*' -h 'Optional extra files'
+
+# With type/choices validation:
+add_argument -l numbers -n '+' -t int -h 'One or more integers'
+add_argument -l levels -n '+' -c 'a,b,c' -h 'One or more levels from choices'
+
+# Access results (space-separated string):
+# ARG_FILES='file1.txt file2.txt file3.txt'
+# ARG_COORDS='10 20 30'
+```
+
+### Files created/modified
+- **Modified:** `bashargparse.sh` - Added nargs support (~850 lines)
+  - Added `-n/--nargs` option parsing in `add_argument()`
+  - Added nargs validation (valid values, incompatible action combinations)
+  - Updated `argparse_parse()` to handle nargs for flags
+  - Updated `argparse_parse()` to handle nargs for positional arguments
+  - Updated `argparse_help()` to display nargs in help output
+  - Increased column width in help output from 20 to 28 for better nargs display
+
+### Testing performed
+- Verified nargs `+` for flags collects multiple values
+- Verified nargs `*` for flags collects values (including zero)
+- Verified nargs with exact number collects exactly N values
+- Verified nargs `+` for positional arguments
+- Verified nargs `*` for positional arguments (including empty)
+- Verified nargs with type validation (int)
+- Verified nargs with choices validation
+- Verified nargs `+` flag error when no values provided
+- Verified nargs with exact count error when not enough values
+- Verified invalid nargs values are rejected
+- Verified nargs with store_true is rejected
+- Verified nargs with count is rejected
+- Verified short flags with nargs work
+- Verified mixed flags and positional with nargs
+- Verified help output displays nargs correctly
+- Verified usage line shows nargs indicators
+- All regression tests pass (existing functionality intact)
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+### Notes
+- When using nargs `*` or `+` on flags, the flag consumes all following non-flag arguments until it hits another flag (starts with `-`). This means positional arguments should generally come before nargs flags, or nargs flags should be last on the command line.
+- Results are stored as space-separated strings. To iterate over values in bash, use: `for file in $ARG_FILES; do ... done`
+
+---
+
+## Task 014: Document limitations vs Python argparse
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Added comprehensive LIMITATIONS section to `examples/demo.sh` output
+- The LIMITATIONS section is displayed when running the demo script
+- Documents three categories of differences:
+
+**NOT IMPLEMENTED features:**
+1. Subcommands (subparsers)
+2. Argument groups
+3. Mutually exclusive groups
+4. Environment variable defaults
+5. Config file integration
+6. store_false action
+7. append action
+8. extend action
+9. Type functions (custom types)
+10. metavar (custom placeholder)
+11. dest (custom destination)
+12. nargs '?' (optional value)
+13. Prefix characters (only '-' supported)
+14. Argument abbreviation
+
+**DIFFERENCES from Python:**
+1. Result storage (environment variables vs namespace object)
+2. nargs results (space-separated string vs list)
+3. Boolean values (1/0 vs True/False)
+4. Help flag (-h/--help always reserved)
+5. Error handling (stderr + exit vs SystemExit)
+
+**BASH-SPECIFIC NOTES:**
+1. Requires bash 4.2+ (for `declare -g`)
+2. Whitespace handling in values
+3. Combined short flags (only works for count actions)
+
+### Files created/modified
+- **Modified:** `examples/demo.sh` - Added LIMITATIONS section to script output (~100 new lines)
+
+### Testing performed
+- Verified `--help` still works correctly
+- Verified normal demo execution displays all sections including LIMITATIONS
+- Verified LIMITATIONS output is well-formatted and readable
+- Verified bash syntax check passes
+
+### Issues encountered
+- None
+
+---
+
+## Task 013: Create comprehensive demo script
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Created `examples/` directory for demo scripts
+- Created `examples/demo.sh` - comprehensive demo showcasing all bashargparse features:
+  - Boolean flags (store_true): `-d/--debug`, `--dry-run`
+  - Count action: `-v/--verbose` (supports `-vvv`)
+  - Value flags with defaults: `-o/--output`, `--config`
+  - Integer type validation: `-p/--port`, `--retries`
+  - Choices validation: `-l/--level`, `--format`
+  - nargs for multiple values: `--files` (+), `--tags` (*), `--coords` (3)
+  - Positional arguments: `input`
+  - Detailed comments explaining each feature
+  - Example output showing all parsed values
+  - Example usage code (verbosity levels, dry-run checks, iterating nargs values)
+- Created `examples/simple.sh` - minimal example showing basic usage:
+  - Demonstrates how easy it is to use the library
+  - Boolean flag, value flag with default, positional argument
+  - Shows automatic help generation
+
+### Files created/modified
+- **Created:** `examples/demo.sh` - Comprehensive demo script (~180 lines)
+- **Created:** `examples/simple.sh` - Simple usage example (~40 lines)
+- **Modified:** `bashargparse.sh` - Fixed `set -u` compatibility (line 12: use `${_BASHARGPARSE_LOADED:-}`)
+- **Modified:** `bashargparse.sh` - Updated shebang to `#!/usr/bin/env bash` with bash 4.2+ note
+
+### Testing performed
+- Verified `--help` displays nicely formatted help with all features
+- Verified basic usage with positional argument
+- Verified verbose count flag works (`-vvv` = 3)
+- Verified boolean flags (debug, dry-run)
+- Verified value flags with defaults
+- Verified integer type validation (accepts valid, rejects invalid)
+- Verified choices validation (accepts valid, rejects invalid)
+- Verified nargs with multiple values
+- Verified simple.sh example works correctly
+- All tests pass with both bash 5.x (homebrew) and fail gracefully with bash 3.x (macOS default)
+
+### Issues encountered
+- **`set -u` compatibility:** The library's multiple-sourcing check used `$_BASHARGPARSE_LOADED` which fails with `set -u`. Fixed by using `${_BASHARGPARSE_LOADED:-}`.
+- **Bash version:** `declare -g` requires bash 4.2+. macOS ships with bash 3.2. Updated shebangs to `#!/usr/bin/env bash` to use newer bash if available, added notes about bash version requirement.
+
+---
+
+## Task 015: Create README with usage examples
+**Date:** 2026-01-22
+**Status:** Completed
+
+### What was accomplished
+- Created comprehensive `README.md` documentation for bashargparse
+- Included all sections requested in the task:
+  - **Quick Start:** Minimal example showing library simplicity
+  - **Installation:** Two methods for sourcing the library
+  - **API Reference:** Complete documentation of all three public functions:
+    - `argparse_init` - parser initialization
+    - `add_argument` - full option table with all flags
+    - `argparse_parse` - parsing and result variables
+  - **Examples:** Code samples for all features:
+    - Boolean flags (store_true)
+    - Value flags with defaults
+    - Required arguments
+    - Integer type validation
+    - Choices validation
+    - Count action (-vvv)
+    - Multiple values (nargs)
+    - Positional arguments
+  - **Complete Example:** A realistic deployment script example
+  - **Limitations vs Python argparse:** Tables documenting:
+    - Features not supported
+    - Key differences from Python
+    - Bash-specific notes
+  - **Link to demo scripts:** Referenced examples/demo.sh and examples/simple.sh
+- Focused on demonstrating simplicity (per user directive in NOTES.md)
+- Used markdown tables for clear comparison with Python argparse
+
+### Files created/modified
+- **Created:** `README.md` - Comprehensive documentation (~250 lines)
+
+### Testing performed
+- Verified all code examples are syntactically correct
+- Verified all feature descriptions match the actual library implementation
+- Verified links to example scripts are correct
+- Verified markdown formatting renders correctly
+
+### Issues encountered
+- None
+
+---
+
