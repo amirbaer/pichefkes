@@ -277,6 +277,198 @@ def git_commit_count(project_dir: Path, from_hash: str, to_hash: str) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# MILESTONE VALIDATION
+# ═══════════════════════════════════════════════════════════════════
+
+
+def extract_code_blocks(description: str) -> list:
+    """Extract code blocks from milestone description.
+
+    Returns list of dicts with 'lang', 'title', and 'commands' keys.
+    """
+    import re
+
+    # Handle JSON escaped newlines
+    description = description.replace("\\n", "\n")
+
+    blocks = []
+
+    # Find code blocks with their preceding section titles
+    # Look for ## Title followed by ```lang ... ```
+    pattern = r'## ([^\n]+)\n```(\w*)\n(.*?)```'
+
+    for match in re.finditer(pattern, description, re.DOTALL):
+        title = match.group(1).strip()
+        lang = match.group(2) or "bash"
+        code = match.group(3).strip()
+
+        if lang in ("bash", "sh", "shell", ""):
+            # Parse commands, handling multi-line strings
+            commands = []
+            lines = code.split("\n")
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                stripped = line.strip()
+
+                # Skip empty lines and comments
+                if not stripped or stripped.startswith("#"):
+                    i += 1
+                    continue
+
+                # Check if line starts a multi-line python -c command
+                # These start with python3 -c " and end with a line that has just "
+                if ('python3 -c "' in stripped or 'python -c "' in stripped) and not stripped.endswith('""'):
+                    # Collect lines until closing quote (line ending with just ")
+                    multi_line = [line]
+                    i += 1
+                    while i < len(lines):
+                        next_line = lines[i]
+                        multi_line.append(next_line)
+                        # Check if this line ends the multi-line command
+                        if next_line.strip() == '"' or next_line.strip().endswith('"'):
+                            i += 1
+                            break
+                        i += 1
+                    # Join as single command
+                    commands.append("\n".join(multi_line))
+                else:
+                    commands.append(stripped)
+                    i += 1
+
+            if commands:
+                blocks.append({
+                    "title": title,
+                    "lang": lang,
+                    "commands": commands,
+                })
+
+    return blocks
+
+
+def run_milestone_validation(project_dir: Path, milestone: dict) -> tuple:
+    """Run validation commands from milestone description.
+
+    Returns (passed: int, failed: int, results: list)
+    """
+    description = milestone.get("description", "")
+    blocks = extract_code_blocks(description)
+
+    if not blocks:
+        return 0, 0, []
+
+    results = []
+    passed = 0
+    failed = 0
+
+    print(f"  {C.BOLD}{C.LAVENDER}Running Milestone Validation{C.NC}")
+    print()
+
+    # Track current directory for cd commands
+    cwd = project_dir
+
+    for block in blocks:
+        title = block["title"]
+        commands = block["commands"]
+
+        print(f"  {C.YELLOW}▸{C.NC} {C.SAGE}{title}{C.NC}")
+
+        block_passed = True
+        for cmd in commands:
+            # Handle cd commands specially - update cwd for subsequent commands
+            if cmd.startswith("cd "):
+                new_dir = cmd[3:].strip()
+                if new_dir == "../..":
+                    cwd = cwd.parent.parent
+                elif new_dir == "..":
+                    cwd = cwd.parent
+                elif new_dir.startswith("/"):
+                    cwd = Path(new_dir)
+                else:
+                    cwd = cwd / new_dir
+                print(f"    {C.DIM}$ {cmd}{C.NC}")
+                continue
+
+            # Handle source commands - skip them (venv activation)
+            if cmd.startswith("source "):
+                print(f"    {C.DIM}$ {cmd} (skipped){C.NC}")
+                continue
+
+            # Handle export commands - set in environment
+            if cmd.startswith("export "):
+                print(f"    {C.DIM}$ {cmd}{C.NC}")
+                # Parse export VAR=value
+                var_part = cmd[7:].strip()
+                if "=" in var_part:
+                    var_name, var_value = var_part.split("=", 1)
+                    # Expand ${HOME} and similar
+                    var_value = var_value.strip('"').strip("'")
+                    var_value = os.path.expandvars(var_value)
+                    os.environ[var_name] = var_value
+                continue
+
+            # Handle pip install - skip
+            if cmd.startswith("pip ") or cmd.startswith("pip3 "):
+                print(f"    {C.DIM}$ {cmd} (skipped){C.NC}")
+                continue
+
+            # Handle python venv creation - skip
+            if "venv" in cmd and "python" in cmd:
+                print(f"    {C.DIM}$ {cmd} (skipped){C.NC}")
+                continue
+
+            # Run the command
+            print(f"    {C.DIM}${C.NC} {C.SKY}{cmd}{C.NC}")
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env=os.environ.copy(),
+                )
+
+                if result.returncode == 0:
+                    print(f"      {C.MINT}✓{C.NC} {C.DIM}exit 0{C.NC}")
+                else:
+                    print(f"      {C.CORAL}✗{C.NC} {C.DIM}exit {result.returncode}{C.NC}")
+                    if result.stderr:
+                        # Show first line of error
+                        err_line = result.stderr.strip().split("\n")[0][:60]
+                        print(f"      {C.DIM}{err_line}{C.NC}")
+                    block_passed = False
+
+            except subprocess.TimeoutExpired:
+                print(f"      {C.CORAL}✗{C.NC} {C.DIM}timeout{C.NC}")
+                block_passed = False
+            except Exception as e:
+                print(f"      {C.CORAL}✗{C.NC} {C.DIM}{str(e)[:50]}{C.NC}")
+                block_passed = False
+
+        if block_passed:
+            passed += 1
+            results.append((title, True, None))
+        else:
+            failed += 1
+            results.append((title, False, "Command failed"))
+
+        print()
+
+    # Summary
+    print(f"  {C.DIM}{'─' * 55}{C.NC}")
+    if failed == 0:
+        print(f"  {C.MINT}✓ All validation steps passed ({passed}/{passed}){C.NC}")
+    else:
+        print(f"  {C.CORAL}✗ Validation: {passed} passed, {failed} failed{C.NC}")
+    print()
+
+    return passed, failed, results
+
+
+# ═══════════════════════════════════════════════════════════════════
 # DISPLAY
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1169,7 +1361,7 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
 
         print()
 
-        # Check if we just completed a milestone - pause for manual verification
+        # Check if we just completed a milestone - run validation then pause
         prd = load_prd(prd_file)
         task_now = next((s for s in prd.get("stories", []) if s["id"] == next_task["id"]), None)
         if task_now and task_now.get("status") == "completed" and is_milestone_task(next_task):
@@ -1180,11 +1372,20 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
             print(f"  {C.YELLOW}{C.BOLD}🛑 MILESTONE REACHED: {next_task['id']}{C.NC}")
             print(f"  {C.SAGE}{next_task['title']}{C.NC}")
             print()
-            print(f"  {C.DIM}Ralph has paused for manual verification.{C.NC}")
-            print(f"  {C.DIM}Review the milestone and run '.ralph/ralph run' when ready.{C.NC}")
-            print()
-            print(f"  {C.MINT}To view milestone details:{C.NC}")
-            print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | grep -A 100 '\"id\": \"{next_task['id']}\"'{C.NC}")
+
+            # Run automated validation of milestone commands
+            passed, failed, results = run_milestone_validation(project_dir, task_now)
+
+            if failed > 0:
+                print(f"  {C.CORAL}{C.BOLD}⚠ Some validation steps failed.{C.NC}")
+                print(f"  {C.DIM}Fix the issues before manual verification.{C.NC}")
+                print()
+                print(f"  {C.MINT}To view full milestone details:{C.NC}")
+                print(f"    {C.SAGE}ralph milestone {next_task['id']}{C.NC}")
+            else:
+                print(f"  {C.DIM}Ralph has paused for manual verification.{C.NC}")
+                print(f"  {C.DIM}Automated checks passed - please verify manually.{C.NC}")
+
             print()
             print(
                 f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
