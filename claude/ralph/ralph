@@ -708,10 +708,65 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
         if desc:
             print(f"  {C.BOLD}{C.LAVENDER}Description:{C.NC}")
             print()
+            print(f"  {C.DIM}{'─' * 55}{C.NC}")
+            print()
             # Handle both \\n (JSON escaped) and actual newlines
             desc_lines = desc.replace("\\n", "\n").split("\n")
+            in_code_block = False
             for line in desc_lines:
-                print(f"  {C.DIM}{line}{C.NC}")
+                stripped = line.strip()
+                # Code block markers
+                if stripped.startswith("```"):
+                    in_code_block = not in_code_block
+                    if in_code_block:
+                        lang = stripped[3:] or "code"
+                        print(f"    {C.DIM}┌─ {lang} ─{'─' * (40 - len(lang))}{C.NC}")
+                    else:
+                        print(f"    {C.DIM}└{'─' * 45}{C.NC}")
+                    continue
+                # Inside code block - show as commands
+                if in_code_block:
+                    if stripped.startswith("#"):
+                        print(f"    {C.DIM}│{C.NC} {C.DIM}{stripped}{C.NC}")
+                    else:
+                        print(f"    {C.DIM}│{C.NC} {C.SKY}{stripped}{C.NC}")
+                    continue
+                # Markdown headers (## Header)
+                if stripped.startswith("## "):
+                    print()
+                    print(f"    {C.YELLOW}{C.BOLD}{stripped[3:]}{C.NC}")
+                    continue
+                if stripped.startswith("# "):
+                    print()
+                    print(f"    {C.CORAL}{C.BOLD}{stripped[2:]}{C.NC}")
+                    continue
+                # Bullet points with checkboxes - [ ] or [x]
+                if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
+                    checked = "[x]" in stripped[:6]
+                    content = stripped[6:].strip()
+                    check = f"{C.MINT}✓{C.NC}" if checked else f"{C.DIM}○{C.NC}"
+                    print(f"      {check} {C.SAGE}{content}{C.NC}")
+                    continue
+                # Regular bullet points
+                if stripped.startswith("- ") or stripped.startswith("* "):
+                    content = stripped[2:]
+                    print(f"    {C.MINT}•{C.NC} {C.SAGE}{content}{C.NC}")
+                    continue
+                # Numbered items
+                if stripped and stripped[0].isdigit() and ". " in stripped[:4]:
+                    num_end = stripped.index(". ")
+                    num = stripped[:num_end]
+                    content = stripped[num_end + 2:]
+                    print(f"    {C.PINK}{num}.{C.NC} {C.SAGE}{content}{C.NC}")
+                    continue
+                # Empty lines
+                if not stripped:
+                    print()
+                    continue
+                # Regular text
+                print(f"    {C.SAGE}{stripped}{C.NC}")
+            print()
+            print(f"  {C.DIM}{'─' * 55}{C.NC}")
             print()
 
         # Manual verification commands
