@@ -190,7 +190,7 @@ def is_milestone_task(task: dict) -> bool:
 
 
 def get_unverified_milestone(prd: dict) -> dict | None:
-    """Get the first completed milestone that hasn't been verified by user.
+    """Get the first completed milestone that hasn't been verified or skipped.
 
     Returns the milestone task dict if found, None otherwise.
     """
@@ -199,6 +199,7 @@ def get_unverified_milestone(prd: dict) -> dict | None:
             story.get("status") == "completed"
             and is_milestone_task(story)
             and not story.get("verified", False)
+            and not story.get("skipped", False)
         ):
             return story
     return None
@@ -209,6 +210,15 @@ def mark_milestone_verified(prd_file: Path, prd: dict, milestone_id: str):
     for story in prd.get("stories", []):
         if story["id"] == milestone_id:
             story["verified"] = True
+            break
+    save_prd(prd_file, prd)
+
+
+def mark_milestone_skipped(prd_file: Path, prd: dict, milestone_id: str):
+    """Mark a milestone as skipped in the PRD."""
+    for story in prd.get("stories", []):
+        if story["id"] == milestone_id:
+            story["skipped"] = True
             break
     save_prd(prd_file, prd)
 
@@ -300,6 +310,8 @@ def print_completed_tasks(prd: dict, indent: str = "    "):
             if is_milestone_task(story):
                 if story.get("verified", False):
                     print(f"{indent}{C.MINT}✓{C.NC} {story['id']}: {story['title']} {C.MINT}[verified]{C.NC}")
+                elif story.get("skipped", False):
+                    print(f"{indent}{C.PEACH}⊘{C.NC} {story['id']}: {story['title']} {C.PEACH}[skipped]{C.NC}")
                 else:
                     print(f"{indent}{C.YELLOW}⚠{C.NC} {story['id']}: {story['title']} {C.YELLOW}[needs verification]{C.NC}")
             else:
@@ -624,6 +636,152 @@ Current stage in the development cycle.
     return True
 
 
+def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_id: str | None = None):
+    """List milestones or show details for a specific milestone."""
+    milestones = [s for s in prd.get("stories", []) if is_milestone_task(s)]
+
+    if not milestones:
+        print(f"  {C.DIM}No milestones found in PRD{C.NC}")
+        print()
+        return
+
+    if milestone_id:
+        # Show details for specific milestone (case-insensitive match)
+        milestone = next(
+            (m for m in milestones if m["id"].lower() == milestone_id.lower()), None
+        )
+        if not milestone:
+            print(f"  {C.CORAL}Milestone '{milestone_id}' not found{C.NC}")
+            print()
+            print(f"  {C.DIM}Available milestones:{C.NC}")
+            for m in milestones:
+                print(f"    {m['id']}: {m['title']}")
+            print()
+            return
+
+        # Handle --skip flag (use actual ID from milestone for correct case)
+        actual_id = milestone["id"]
+        if args.skip:
+            mark_milestone_skipped(prd_file, prd, actual_id)
+            print(f"  {C.MINT}✓ Milestone {actual_id} marked as skipped{C.NC}")
+            print(f"  {C.DIM}Ralph will no longer pause for this milestone.{C.NC}")
+            print()
+            return
+
+        # Show milestone details
+        status = milestone.get("status", "open")
+        verified = milestone.get("verified", False)
+        skipped = milestone.get("skipped", False)
+
+        print(f"  {C.BOLD}{C.LAVENDER}Milestone: {milestone['id']}{C.NC}")
+        print()
+        print(f"  {C.SAGE}{milestone['title']}{C.NC}")
+        print()
+
+        # Status
+        if status == "completed":
+            if verified:
+                print(f"  {C.DIM}Status:{C.NC}  {C.MINT}✓ Completed & Verified{C.NC}")
+            elif skipped:
+                print(f"  {C.DIM}Status:{C.NC}  {C.PEACH}⊘ Completed (skipped){C.NC}")
+            else:
+                print(f"  {C.DIM}Status:{C.NC}  {C.YELLOW}⚠ Completed (needs verification){C.NC}")
+        else:
+            print(f"  {C.DIM}Status:{C.NC}  {C.DIM}○ Open{C.NC}")
+
+        # Dependencies
+        deps = milestone.get("dependencies", [])
+        if deps:
+            completed_ids = get_completed_task_ids(prd)
+            print(f"  {C.DIM}Depends on:{C.NC}")
+            for dep_id in deps:
+                dep_done = dep_id in completed_ids
+                indicator = f"{C.MINT}✓{C.NC}" if dep_done else f"{C.DIM}○{C.NC}"
+                # Find dep title
+                dep_task = next((s for s in prd.get("stories", []) if s["id"] == dep_id), None)
+                dep_title = dep_task["title"] if dep_task else "(unknown)"
+                print(f"    {indicator} {dep_id}: {dep_title}")
+        print()
+
+        # Description
+        desc = milestone.get("description", "")
+        if desc:
+            print(f"  {C.BOLD}{C.LAVENDER}Description:{C.NC}")
+            print()
+            # Handle both \\n (JSON escaped) and actual newlines
+            desc_lines = desc.replace("\\n", "\n").split("\n")
+            for line in desc_lines:
+                print(f"  {C.DIM}{line}{C.NC}")
+            print()
+
+        # Manual verification commands
+        print(f"  {C.BOLD}{C.LAVENDER}Manual Verification Commands:{C.NC}")
+        print()
+        print(f"  {C.DIM}View this milestone in PRD:{C.NC}")
+        print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | jq '.stories[] | select(.id==\"{milestone_id}\")'{C.NC}")
+        print()
+        print(f"  {C.DIM}View progress log:{C.NC}")
+        run_dir = get_run_dir(prd_file)
+        if run_dir:
+            progress_file = run_dir / "progress.txt"
+            print(f"    {C.SAGE}cat {progress_file.relative_to(project_dir)}{C.NC}")
+        else:
+            print(f"    {C.SAGE}cat .ralph/progress.txt{C.NC}")
+        print()
+        print(f"  {C.DIM}View git log for recent changes:{C.NC}")
+        print(f"    {C.SAGE}git log --oneline -20{C.NC}")
+        print()
+        print(f"  {C.DIM}Check file changes:{C.NC}")
+        print(f"    {C.SAGE}git diff HEAD~5 --stat{C.NC}")
+        print()
+
+        if status == "completed" and not verified:
+            print(f"  {C.BOLD}{C.YELLOW}To mark as verified:{C.NC}")
+            print(f"    {C.SAGE}ralph run{C.NC}  {C.DIM}(will prompt for verification){C.NC}")
+            print()
+
+    else:
+        # List all milestones
+        print(f"  {C.BOLD}{C.LAVENDER}Milestones{C.NC}")
+        print()
+
+        completed_ids = get_completed_task_ids(prd)
+
+        for milestone in milestones:
+            status = milestone.get("status", "open")
+            verified = milestone.get("verified", False)
+            skipped = milestone.get("skipped", False)
+            deps = milestone.get("dependencies", [])
+            deps_met = all(d in completed_ids for d in deps)
+
+            # Determine indicator
+            if status == "completed":
+                if verified:
+                    indicator = f"{C.MINT}✓{C.NC}"
+                    status_text = f"{C.MINT}verified{C.NC}"
+                elif skipped:
+                    indicator = f"{C.PEACH}⊘{C.NC}"
+                    status_text = f"{C.PEACH}skipped{C.NC}"
+                else:
+                    indicator = f"{C.YELLOW}⚠{C.NC}"
+                    status_text = f"{C.YELLOW}needs verification{C.NC}"
+            else:
+                if deps_met:
+                    indicator = f"{C.SKY}→{C.NC}"
+                    status_text = f"{C.DIM}ready{C.NC}"
+                else:
+                    indicator = f"{C.DIM}⏸{C.NC}"
+                    status_text = f"{C.DIM}blocked{C.NC}"
+
+            print(f"  {indicator} {C.PINK}{milestone['id']}{C.NC}: {milestone['title']}")
+            print(f"      {status_text}")
+            print()
+
+        print(f"  {C.DIM}View details:{C.NC} {C.SAGE}ralph milestone <id>{C.NC}")
+        print(f"  {C.DIM}Skip milestone:{C.NC} {C.SAGE}ralph milestone <id> --skip{C.NC}")
+        print()
+
+
 def cmd_runs(args, project_dir: Path):
     """List all runs."""
     runs_dir = project_dir / ".ralph" / "runs"
@@ -757,54 +915,39 @@ def cmd_run(args, project_dir: Path, prd_file: Path, prd: dict):
         print()
         return
 
-    # Check for unverified milestones BEFORE asking to proceed
-    unverified = get_unverified_milestone(prd)
+    # Check for unverified milestones BEFORE asking to proceed (unless skipping)
+    if not args.skip_milestones:
+        unverified = get_unverified_milestone(prd)
+    else:
+        unverified = None
+        print(f"  {C.DIM}(Skipping milestone verification){C.NC}")
+        print()
+
     if unverified:
         print(
-            f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
+            f"  {C.SKY}─────────────────────────────────────────────────────────{C.NC}"
         )
         print()
         print(f"  {C.YELLOW}{C.BOLD}🛑 UNVERIFIED MILESTONE: {unverified['id']}{C.NC}")
         print(f"  {C.SAGE}{unverified['title']}{C.NC}")
         print()
-        print(f"  {C.DIM}This milestone was completed but not yet verified.{C.NC}")
-        print(f"  {C.DIM}Please review before continuing.{C.NC}")
-        print()
-        print(f"  {C.MINT}Milestone description:{C.NC}")
-        # Show first few lines of description
-        desc_lines = unverified.get("description", "").split("\\n")[:15]
-        for line in desc_lines:
-            print(f"  {C.DIM}{line}{C.NC}")
-        if len(unverified.get("description", "").split("\\n")) > 15:
-            print(f"  {C.DIM}...{C.NC}")
-        print()
-        print(f"  {C.MINT}To view full details:{C.NC}")
-        print(
-            f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | grep -A 100 '\"id\": \"{unverified['id']}\"'{C.NC}"
-        )
-        print()
-        print(
-            f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
-        )
+        print(f"  {C.DIM}This milestone needs verification before continuing.{C.NC}")
+        print(f"  {C.DIM}For full details:{C.NC} {C.SAGE}ralph milestone {unverified['id']}{C.NC}")
         print()
         try:
             reply = input(
-                f"  {C.YELLOW}Mark milestone {unverified['id']} as verified and continue? [y/N]{C.NC} "
+                f"  {C.YELLOW}Mark as verified and continue? [y/N]{C.NC} "
             ).strip().lower()
         except (KeyboardInterrupt, EOFError):
             print()
             print()
-            print(
-                f"  {C.PEACH}Paused. Verify milestone and run '.ralph/ralph run' to continue.{C.NC}"
-            )
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
             print()
             return
 
         if reply not in ("y", "yes"):
             print()
-            print(
-                f"  {C.PEACH}Paused. Verify milestone and run '.ralph/ralph run' to continue.{C.NC}"
-            )
+            print(f"  {C.PEACH}Run 'ralph milestone {unverified['id']}' to review.{C.NC}")
             print()
             return
 
@@ -1048,12 +1191,21 @@ def print_usage():
     )
     print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
     print(
+        f"    {C.MINT}milestone{C.NC}       {C.DIM}List milestones or show details (milestone <id>){C.NC}"
+    )
+    print(
         f"    {C.MINT}install{C.NC}         {C.DIM}Install ralph in current directory{C.NC}"
     )
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Options:{C.NC}")
     print(
         f"    {C.MINT}-y, --yes{C.NC}       {C.DIM}Skip confirmation prompt (for run){C.NC}"
+    )
+    print(
+        f"    {C.MINT}-s{C.NC}              {C.DIM}Skip all milestone verifications (for run){C.NC}"
+    )
+    print(
+        f"    {C.MINT}--skip{C.NC}          {C.DIM}Mark milestone as skipped (for milestone <id>){C.NC}"
     )
     print(
         f"    {C.MINT}-n, --max{C.NC} N     {C.DIM}Max iterations (default: 20){C.NC}"
@@ -1075,6 +1227,12 @@ def print_usage():
         f"    {C.SAGE}ralph info{C.NC}         {C.DIM}Show current status{C.NC}"
     )
     print(f"    {C.SAGE}ralph runs{C.NC}         {C.DIM}List all runs{C.NC}")
+    print(f"    {C.SAGE}ralph milestone{C.NC}    {C.DIM}List all milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone M1{C.NC} {C.DIM}Show details for milestone M1{C.NC}")
+    print(
+        f"    {C.SAGE}ralph milestone M1 --skip{C.NC}  {C.DIM}Skip milestone M1{C.NC}"
+    )
+    print(f"    {C.SAGE}ralph run -s{C.NC}       {C.DIM}Run without milestone pauses{C.NC}")
     print(f"    {C.SAGE}ralph install{C.NC}      {C.DIM}Install ralph in current dir{C.NC}")
     print()
 
@@ -1090,7 +1248,10 @@ def main():
     )
 
     parser.add_argument("command", nargs="?", default=None)
+    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>
     parser.add_argument("-y", "--yes", action="store_true")
+    parser.add_argument("-s", "--skip-milestones", action="store_true", dest="skip_milestones")
+    parser.add_argument("--skip", action="store_true")  # For milestone <id> --skip
     parser.add_argument("-n", "--max", type=int, default=20, dest="max_iterations")
     parser.add_argument("-h", "--help", action="store_true")
 
@@ -1115,7 +1276,7 @@ def main():
         cmd_install(args, target_dir)
     elif command == "runs":
         cmd_runs(args, project_dir)
-    elif command in ("run", "info"):
+    elif command in ("run", "info", "milestone"):
         if not prd_file:
             print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
             print(f"  {C.DIM}Looked for: .ralph/runs/run-*/prd.json (active){C.NC}")
@@ -1124,6 +1285,8 @@ def main():
         prd = load_prd(prd_file)
         if command == "run":
             cmd_run(args, project_dir, prd_file, prd)
+        elif command == "milestone":
+            cmd_milestone(args, project_dir, prd_file, prd, args.subarg)
         else:
             cmd_info(args, project_dir, prd_file, prd)
     else:
