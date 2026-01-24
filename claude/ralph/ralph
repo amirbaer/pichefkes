@@ -828,8 +828,142 @@ Current stage in the development cycle.
     return True
 
 
-def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_id: str | None = None):
-    """List milestones or show details for a specific milestone."""
+def get_prereqs_cwd(project_dir: Path, blocks: list) -> Path:
+    """Get the working directory from Prerequisites step (if any)."""
+    cwd = project_dir
+    # Look for Prerequisites or first step with cd command
+    for block in blocks:
+        if "prereq" in block["title"].lower():
+            for cmd in block["commands"]:
+                if cmd.strip().startswith("cd "):
+                    new_dir = cmd.strip()[3:].strip()
+                    if new_dir.startswith("/"):
+                        cwd = Path(new_dir)
+                    else:
+                        cwd = project_dir / new_dir
+                    break
+            break
+    return cwd
+
+
+def run_milestone_step(project_dir: Path, step: dict, step_num: int, initial_cwd: Path = None) -> bool:
+    """Run a single milestone verification step.
+
+    Shows description, copyable code, then executes it.
+    Returns True if step passed.
+    """
+    title = step["title"]
+    commands = step["commands"]
+
+    print(f"  {C.BOLD}{C.LAVENDER}Step {step_num}: {title}{C.NC}")
+    print()
+
+    # Show copyable code block
+    print(f"  {C.DIM}┌{'─' * 60}{C.NC}")
+    for cmd in commands:
+        # For multi-line commands, show each line
+        for line in cmd.split("\n"):
+            print(f"  {C.DIM}│{C.NC} {C.SKY}{line}{C.NC}")
+    print(f"  {C.DIM}└{'─' * 60}{C.NC}")
+    print()
+
+    # Ask to run
+    try:
+        reply = input(f"  {C.YELLOW}Run this step? [Y/n]{C.NC} ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return False
+
+    if reply in ("n", "no"):
+        print(f"  {C.DIM}Skipped{C.NC}")
+        print()
+        return True  # Not a failure, just skipped
+
+    print()
+
+    # Track cwd for cd commands - start from prereqs cwd if provided
+    cwd = initial_cwd or project_dir
+    all_passed = True
+
+    for cmd in commands:
+        # Handle cd commands
+        if cmd.strip().startswith("cd "):
+            new_dir = cmd.strip()[3:].strip()
+            if new_dir == "../..":
+                cwd = cwd.parent.parent
+            elif new_dir == "..":
+                cwd = cwd.parent
+            elif new_dir.startswith("/"):
+                cwd = Path(new_dir)
+            else:
+                cwd = cwd / new_dir
+            print(f"  {C.DIM}$ cd {new_dir}{C.NC}")
+            continue
+
+        # Skip source/venv/pip
+        if cmd.strip().startswith("source ") or "venv" in cmd or cmd.strip().startswith("pip"):
+            print(f"  {C.DIM}$ {cmd.split(chr(10))[0][:50]}... (skipped){C.NC}")
+            continue
+
+        # Handle export
+        if cmd.strip().startswith("export "):
+            var_part = cmd.strip()[7:].strip()
+            if "=" in var_part:
+                var_name, var_value = var_part.split("=", 1)
+                var_value = var_value.strip('"').strip("'")
+                var_value = os.path.expandvars(var_value)
+                os.environ[var_name] = var_value
+            print(f"  {C.DIM}$ {cmd.strip()}{C.NC}")
+            continue
+
+        # Show command being run
+        first_line = cmd.split("\n")[0]
+        if "\n" in cmd:
+            print(f"  {C.DIM}${C.NC} {C.SKY}{first_line}...{C.NC} {C.DIM}(multi-line){C.NC}")
+        else:
+            print(f"  {C.DIM}${C.NC} {C.SKY}{cmd[:70]}{C.NC}")
+
+        # Run the command
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=os.environ.copy(),
+            )
+
+            if result.returncode == 0:
+                print(f"  {C.MINT}✓ Success{C.NC}")
+                # Show some output if available
+                if result.stdout.strip():
+                    for line in result.stdout.strip().split("\n")[:10]:
+                        print(f"    {C.DIM}{line[:80]}{C.NC}")
+                    if result.stdout.count("\n") > 10:
+                        print(f"    {C.DIM}... ({result.stdout.count(chr(10)) - 10} more lines){C.NC}")
+            else:
+                print(f"  {C.CORAL}✗ Failed (exit {result.returncode}){C.NC}")
+                if result.stderr.strip():
+                    for line in result.stderr.strip().split("\n")[:5]:
+                        print(f"    {C.CORAL}{line[:80]}{C.NC}")
+                all_passed = False
+
+        except subprocess.TimeoutExpired:
+            print(f"  {C.CORAL}✗ Timeout (5 min){C.NC}")
+            all_passed = False
+        except Exception as e:
+            print(f"  {C.CORAL}✗ Error: {e}{C.NC}")
+            all_passed = False
+
+        print()
+
+    return all_passed
+
+
+def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_id: str | None = None, step_num: str | None = None):
+    """List milestones, show details, or run a specific step."""
     milestones = [s for s in prd.get("stories", []) if is_milestone_task(s)]
 
     if not milestones:
@@ -859,6 +993,31 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
             print(f"  {C.DIM}Ralph will no longer pause for this milestone.{C.NC}")
             print()
             return
+
+        # Get verification steps
+        blocks = extract_code_blocks(milestone.get("description", ""))
+
+        # Handle step execution: ralph milestone M1 <step>
+        if step_num:
+            try:
+                step_idx = int(step_num) - 1  # 1-indexed for user
+                if step_idx < 0 or step_idx >= len(blocks):
+                    print(f"  {C.CORAL}Step {step_num} not found{C.NC}")
+                    print(f"  {C.DIM}Available steps: 1-{len(blocks)}{C.NC}")
+                    print()
+                    return
+                step = blocks[step_idx]
+                # Get working directory from Prerequisites step
+                initial_cwd = get_prereqs_cwd(project_dir, blocks)
+                if initial_cwd != project_dir:
+                    print(f"  {C.DIM}Working directory: {initial_cwd}{C.NC}")
+                    print()
+                run_milestone_step(project_dir, step, int(step_num), initial_cwd)
+                return
+            except ValueError:
+                print(f"  {C.CORAL}Invalid step number: {step_num}{C.NC}")
+                print()
+                return
 
         # Show milestone details
         status = milestone.get("status", "open")
@@ -895,7 +1054,20 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
                 print(f"    {indicator} {dep_id}: {dep_title}")
         print()
 
-        # Description
+        # Verification steps
+        if blocks:
+            print(f"  {C.BOLD}{C.LAVENDER}Verification Steps:{C.NC}")
+            print()
+            for i, block in enumerate(blocks, 1):
+                print(f"    {C.PINK}{i}{C.NC}  {C.SAGE}{block['title']}{C.NC}")
+                print(f"       {C.DIM}{len(block['commands'])} command(s){C.NC}")
+            print()
+            print(f"  {C.DIM}Run a step:{C.NC} {C.SAGE}ralph milestone {actual_id} <step>{C.NC}")
+            print(f"  {C.DIM}Example:{C.NC}    {C.SAGE}ralph milestone {actual_id} 1{C.NC}")
+            print()
+            return  # Don't show the full description - steps are cleaner
+
+        # Description (fallback if no steps found)
         desc = milestone.get("description", "")
         if desc:
             print(f"  {C.BOLD}{C.LAVENDER}Description:{C.NC}")
@@ -1361,7 +1533,7 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
 
         print()
 
-        # Check if we just completed a milestone - run validation then pause
+        # Check if we just completed a milestone - pause for verification
         prd = load_prd(prd_file)
         task_now = next((s for s in prd.get("stories", []) if s["id"] == next_task["id"]), None)
         if task_now and task_now.get("status") == "completed" and is_milestone_task(next_task):
@@ -1372,26 +1544,18 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
             print(f"  {C.YELLOW}{C.BOLD}🛑 MILESTONE REACHED: {next_task['id']}{C.NC}")
             print(f"  {C.SAGE}{next_task['title']}{C.NC}")
             print()
-
-            # Run automated validation of milestone commands
-            passed, failed, results = run_milestone_validation(project_dir, task_now)
-
-            if failed > 0:
-                print(f"  {C.CORAL}{C.BOLD}⚠ Some validation steps failed.{C.NC}")
-                print(f"  {C.DIM}Fix the issues before manual verification.{C.NC}")
-                print()
-                print(f"  {C.MINT}To view full milestone details:{C.NC}")
-                print(f"    {C.SAGE}ralph milestone {next_task['id']}{C.NC}")
-            else:
-                print(f"  {C.DIM}Ralph has paused for manual verification.{C.NC}")
-                print(f"  {C.DIM}Automated checks passed - please verify manually.{C.NC}")
-
+            print(f"  {C.DIM}Ralph has paused for manual verification.{C.NC}")
+            print()
+            print(f"  {C.MINT}Run verification steps:{C.NC}")
+            print(f"    {C.SAGE}ralph milestone {next_task['id']}{C.NC}       {C.DIM}# See all steps{C.NC}")
+            print(f"    {C.SAGE}ralph milestone {next_task['id']} 1{C.NC}     {C.DIM}# Run step 1{C.NC}")
+            print()
+            print(f"  {C.DIM}When verified, run:{C.NC} {C.SAGE}ralph run{C.NC}")
             print()
             print(
                 f"  {C.SKY}═══════════════════════════════════════════════════════════{C.NC}"
             )
             print()
-            # Don't prompt here - user will run ralph again and be prompted to verify
             return
 
         time.sleep(1)
@@ -1447,7 +1611,7 @@ def print_usage():
     )
     print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
     print(
-        f"    {C.MINT}milestone{C.NC}       {C.DIM}List milestones or show details (milestone <id>){C.NC}"
+        f"    {C.MINT}milestone{C.NC}       {C.DIM}List milestones, show steps, or run a step{C.NC}"
     )
     print(
         f"    {C.MINT}install{C.NC}         {C.DIM}Install ralph in current directory{C.NC}"
@@ -1484,7 +1648,8 @@ def print_usage():
     )
     print(f"    {C.SAGE}ralph runs{C.NC}         {C.DIM}List all runs{C.NC}")
     print(f"    {C.SAGE}ralph milestone{C.NC}    {C.DIM}List all milestones{C.NC}")
-    print(f"    {C.SAGE}ralph milestone M1{C.NC} {C.DIM}Show details for milestone M1{C.NC}")
+    print(f"    {C.SAGE}ralph milestone M1{C.NC} {C.DIM}Show verification steps for M1{C.NC}")
+    print(f"    {C.SAGE}ralph milestone M1 1{C.NC}  {C.DIM}Run step 1 of milestone M1{C.NC}")
     print(
         f"    {C.SAGE}ralph milestone M1 --skip{C.NC}  {C.DIM}Skip milestone M1{C.NC}"
     )
@@ -1505,6 +1670,7 @@ def main():
 
     parser.add_argument("command", nargs="?", default=None)
     parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>
+    parser.add_argument("subarg2", nargs="?", default=None)  # For milestone <id> <step>
     parser.add_argument("-y", "--yes", action="store_true")
     parser.add_argument("-s", "--skip-milestones", action="store_true", dest="skip_milestones")
     parser.add_argument("--skip", action="store_true")  # For milestone <id> --skip
@@ -1542,7 +1708,7 @@ def main():
         if command == "run":
             cmd_run(args, project_dir, prd_file, prd)
         elif command == "milestone":
-            cmd_milestone(args, project_dir, prd_file, prd, args.subarg)
+            cmd_milestone(args, project_dir, prd_file, prd, args.subarg, args.subarg2)
         else:
             cmd_info(args, project_dir, prd_file, prd)
     else:
