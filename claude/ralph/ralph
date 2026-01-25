@@ -1285,6 +1285,109 @@ def cmd_runs(args, project_dir: Path):
     print()
 
 
+def cmd_show(args, project_dir: Path):
+    """Show details of a specific run."""
+    run_ref = args.subarg
+    if not run_ref:
+        print(f"  {C.CORAL}Error: Please specify a run{C.NC}")
+        print(f"  {C.DIM}Usage: ralph show <index|name>{C.NC}")
+        print(f"  {C.DIM}Example: ralph show 1{C.NC}")
+        print(f"  {C.DIM}Example: ralph show run-002-feature{C.NC}")
+        print()
+        return
+
+    runs_dir = project_dir / ".ralph" / "runs"
+    if not runs_dir.exists():
+        print(f"  {C.DIM}No runs found{C.NC}")
+        print()
+        return
+
+    run_dirs = sorted(
+        [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run-")],
+        key=lambda d: d.name,
+    )
+
+    # Find the run by index or name
+    run_dir = None
+    try:
+        idx = int(run_ref) - 1  # 1-indexed for user
+        if 0 <= idx < len(run_dirs):
+            run_dir = run_dirs[idx]
+    except ValueError:
+        # Try matching by name
+        for d in run_dirs:
+            if d.name == run_ref or run_ref in d.name:
+                run_dir = d
+                break
+
+    if not run_dir:
+        print(f"  {C.CORAL}Run not found: {run_ref}{C.NC}")
+        print()
+        print(f"  {C.DIM}Available runs:{C.NC}")
+        for i, d in enumerate(run_dirs, 1):
+            print(f"    {i}. {d.name}")
+        print()
+        return
+
+    prd_file = run_dir / "prd.json"
+    if not prd_file.exists():
+        print(f"  {C.CORAL}No PRD found in {run_dir.name}{C.NC}")
+        print()
+        return
+
+    prd = load_prd(prd_file)
+    counts = count_tasks_by_status(prd)
+
+    # Header
+    print(f"  {C.BOLD}{C.LAVENDER}Run:{C.NC} {C.SAGE}{run_dir.name}{C.NC}")
+    print()
+    print(f"  {C.DIM}Title{C.NC}         {C.SAGE}{get_prd_title(prd)}{C.NC}")
+    print(f"  {C.DIM}Status{C.NC}        {C.SAGE}{prd.get('status', 'unknown')}{C.NC}")
+    print(f"  {C.DIM}Created{C.NC}       {C.SAGE}{prd.get('created', 'unknown')}{C.NC}")
+    print(f"  {C.DIM}Progress{C.NC}      {C.SAGE}{counts['completed']}{C.NC}{C.DIM}/{C.NC}{C.SAGE}{counts['total']}{C.NC} {C.DIM}tasks{C.NC}")
+    print()
+
+    # Tasks
+    stories = prd.get("stories", [])
+    if stories:
+        print(f"  {C.BOLD}{C.LAVENDER}Tasks:{C.NC}")
+        print()
+
+        # Group by category
+        by_category = {}
+        for story in stories:
+            cat = story.get("category", "general")
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(story)
+
+        for cat, tasks in by_category.items():
+            if len(by_category) > 1:
+                print(f"  {C.YELLOW}{cat}{C.NC}")
+            for task in tasks:
+                status = task.get("status", "open")
+                if status == "completed":
+                    icon = f"{C.MINT}✓{C.NC}"
+                else:
+                    icon = f"{C.DIM}○{C.NC}"
+                is_ms = is_milestone_task(task)
+                ms_marker = f" {C.PINK}[M]{C.NC}" if is_ms else ""
+                print(f"    {icon} {C.PINK}{task['id']}{C.NC}: {task['title']}{ms_marker}")
+            print()
+
+    # Progress file
+    progress_file = run_dir / "progress.txt"
+    if progress_file.exists():
+        print(f"  {C.DIM}Progress log:{C.NC} {C.SAGE}{progress_file.relative_to(project_dir)}{C.NC}")
+
+    # Actions
+    if prd.get("status") == "paused":
+        print()
+        print(f"  {C.DIM}To resume this run:{C.NC}")
+        print(f"    {C.SAGE}# Edit PRD status to 'active'{C.NC}")
+    print()
+
+
 def cmd_info(args, project_dir: Path, prd_file: Path, prd: dict):
     """Show current cycle status and PRD details."""
     counts = count_tasks_by_status(prd)
@@ -1764,7 +1867,7 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
 
     if not stories:
         print(f"  {C.CORAL}Error: No tasks in PRD{C.NC}")
-        print(f"  {C.DIM}Add tasks with: ralph stage add \"Task title\"{C.NC}")
+        print(f"  {C.DIM}Add tasks with: ralph add \"Task title\"{C.NC}")
         print()
         return
 
@@ -1943,6 +2046,7 @@ def print_usage():
         f"    {C.MINT}info{C.NC}            {C.DIM}Show current status{C.NC}"
     )
     print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
+    print(f"    {C.MINT}show{C.NC}            {C.DIM}Show details of a run{C.NC}")
     print(
         f"    {C.MINT}milestone{C.NC}       {C.DIM}Manage milestones{C.NC}"
     )
@@ -1981,6 +2085,7 @@ def print_usage():
     print(f"  {C.DIM}Status:{C.NC}")
     print(f"    {C.SAGE}ralph info{C.NC}               {C.DIM}Show current status{C.NC}")
     print(f"    {C.SAGE}ralph runs{C.NC}               {C.DIM}List all runs{C.NC}")
+    print(f"    {C.SAGE}ralph show 1{C.NC}             {C.DIM}Show run details{C.NC}")
     print(f"    {C.SAGE}ralph milestone{C.NC}          {C.DIM}List milestones{C.NC}")
     print()
 
@@ -1996,15 +2101,15 @@ def main():
     )
 
     parser.add_argument("command", nargs="?", default=None)
-    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>, stage <subcommand>
-    parser.add_argument("subarg2", nargs="?", default=None)  # For milestone <id> <step>, stage add <title>
+    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>, show <run>
+    parser.add_argument("subarg2", nargs="?", default=None)  # For milestone <id> <step>
     parser.add_argument("-y", "--yes", action="store_true")
     parser.add_argument("-s", "--skip-milestones", action="store_true", dest="skip_milestones")
     parser.add_argument("--skip", action="store_true")  # For milestone <id> --skip
     parser.add_argument("-n", "--max", type=int, default=20, dest="max_iterations")
     parser.add_argument("-h", "--help", action="store_true")
-    parser.add_argument("--desc", type=str, default="")  # For stage add --desc
-    parser.add_argument("--category", "-c", type=str, default="")  # For stage add --category
+    parser.add_argument("--desc", type=str, default="")  # For add --desc
+    parser.add_argument("--category", "-c", type=str, default="")  # For add --category
     parser.add_argument("--force", "-f", action="store_true")  # For compile --force
     parser.add_argument("--interval", "-i", type=int, default=5)  # For compile --interval
     parser.add_argument("--by-category", action="store_true", dest="by_category", default=True)
@@ -2031,6 +2136,8 @@ def main():
         cmd_install(args, target_dir)
     elif command == "runs":
         cmd_runs(args, project_dir)
+    elif command == "show":
+        cmd_show(args, project_dir)
     elif command == "new":
         cmd_new(args, project_dir)
     elif command == "add":
