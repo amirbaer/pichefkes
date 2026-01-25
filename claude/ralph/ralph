@@ -1861,6 +1861,77 @@ def cmd_add(args, project_dir: Path, prd_file: Path, prd: dict):
 # ═══════════════════════════════════════════════════════════════════
 
 
+def analyze_tasks_for_milestones(project_dir: Path, prd_title: str, tasks: list) -> list[dict] | None:
+    """Use Claude to analyze tasks and suggest logical milestone groupings.
+
+    Returns a list of milestone suggestions, each with:
+    - title: milestone title
+    - description: what this milestone verifies
+    - task_ids: list of task IDs in this group
+    """
+    tasks_json = json.dumps([{"id": t["id"], "title": t["title"], "description": t.get("description", "")} for t in tasks], indent=2)
+
+    prompt = f"""Analyze these development tasks and suggest logical milestone groupings.
+
+Project: {prd_title}
+Project directory: {project_dir}
+
+Tasks:
+{tasks_json}
+
+Group related tasks together into milestones. Consider:
+- Tasks that form a logical unit of work
+- Dependencies between tasks
+- Natural verification points
+
+Return a JSON array of milestone objects:
+[
+  {{
+    "title": "Milestone: <meaningful title>",
+    "description": "Brief description of what this milestone verifies",
+    "task_ids": ["001", "002", "003"]
+  }},
+  ...
+]
+
+Guidelines:
+- Create 1-4 milestones depending on task count and logical groupings
+- Each milestone should group 2-5 related tasks
+- Every task must be assigned to exactly one milestone
+- Order milestones by when they should be verified (based on task dependencies)
+- If tasks should be reordered for better flow, include "reorder": true and list task_ids in the suggested execution order
+
+Return ONLY the JSON array, no other text.
+"""
+
+    try:
+        result = subprocess.run(
+            ["claude", "--print", "-p", prompt],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            cwd=project_dir,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        response = result.stdout.strip()
+
+        # Try to extract JSON array from response
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response)
+        if json_match:
+            milestones = json.loads(json_match.group())
+            if isinstance(milestones, list) and len(milestones) > 0:
+                return milestones
+
+        return None
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
+
+
 def generate_milestone_with_claude(project_dir: Path, prd_title: str, tasks: list, milestone_num: int, category: str | None = None) -> dict | None:
     """Use Claude to generate a milestone with verification steps."""
     tasks_json = json.dumps(tasks, indent=2)
@@ -1960,144 +2031,136 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
         print(f"  {C.DIM}Removed {len(existing_milestones)} existing milestone(s){C.NC}")
         print()
 
-    # Get configuration
-    milestone_interval = getattr(args, 'interval', 5) or 5  # Default: every 5 tasks
-    by_category = getattr(args, 'by_category', True)  # Default: milestone per category
-
-    print(f"  {C.BOLD}{C.LAVENDER}Compiling PRD:{C.NC} {C.SAGE}{get_prd_title(prd)}{C.NC}")
-    print()
-    print(f"  {C.DIM}Tasks:{C.NC} {len(stories)}")
-    print(f"  {C.DIM}Strategy:{C.NC} {'By category' if by_category else f'Every {milestone_interval} tasks'}")
-    print()
-
-    # Group tasks by category
-    categories = {}
-    for story in stories:
-        cat = story.get("category", "general")
-        if cat not in categories:
-            categories[cat] = []
-        categories[cat].append(story)
-
-    milestones_to_add = []
-    milestone_num = 1
     prd_title = get_prd_title(prd)
 
-    print(f"  {C.DIM}Generating milestones with Claude...{C.NC}")
+    print(f"  {C.BOLD}{C.LAVENDER}Compiling PRD:{C.NC} {C.SAGE}{prd_title}{C.NC}")
+    print()
+    print(f"  {C.DIM}Tasks:{C.NC} {len(stories)}")
     print()
 
-    if by_category and len(categories) > 1:
-        # Add milestone after each category
-        for cat, tasks in categories.items():
-            if not tasks:
-                continue
+    # Build task lookup
+    task_by_id = {s["id"]: s for s in stories}
 
-            task_ids = [t["id"] for t in tasks]
-            last_task_id = task_ids[-1]
+    # Ask Claude to analyze tasks and suggest groupings
+    print(f"  {C.DIM}Analyzing tasks with Claude...{C.NC}")
+    print()
 
-            print(f"    {C.DIM}Generating milestone for {cat}...{C.NC}", end=" ", flush=True)
+    analysis = analyze_tasks_for_milestones(project_dir, prd_title, stories)
 
-            # Try to generate with Claude
-            claude_milestone = generate_milestone_with_claude(
-                project_dir, prd_title, tasks, milestone_num, cat
-            )
+    if not analysis:
+        print(f"  {C.CORAL}Failed to analyze tasks with Claude{C.NC}")
+        print(f"  {C.DIM}Try again or add milestones manually{C.NC}")
+        print()
+        return
 
-            if claude_milestone:
-                milestone = {
-                    "id": f"M{milestone_num:02d}",
-                    "title": claude_milestone.get("title", f"Milestone: Review {cat}"),
-                    "description": claude_milestone.get("description", ""),
-                    "status": "open",
-                    "category": "milestone",
-                    "dependencies": task_ids
-                }
-                print(f"{C.MINT}✓{C.NC}")
-            else:
-                # Fallback to generic milestone
-                milestone = {
-                    "id": f"M{milestone_num:02d}",
-                    "title": f"Milestone: Review {cat} tasks",
-                    "description": f"Review and verify the {cat} implementation.\n\nTasks completed:\n" +
-                                  "\n".join(f"- {t['id']}: {t['title']}" for t in tasks),
-                    "status": "open",
-                    "category": "milestone",
-                    "dependencies": task_ids
-                }
-                print(f"{C.YELLOW}(fallback){C.NC}")
+    # Show suggested groupings
+    print(f"  {C.BOLD}{C.LAVENDER}Suggested milestone groupings:{C.NC}")
+    print()
 
-            milestones_to_add.append((milestone, last_task_id))
-            milestone_num += 1
-    else:
-        # Add milestone every N tasks
-        for i in range(milestone_interval, len(stories) + 1, milestone_interval):
-            batch = stories[max(0, i - milestone_interval):i]
-            task_ids = [t["id"] for t in batch]
+    # Check if any reordering is suggested
+    suggested_order = []
+    for group in analysis:
+        suggested_order.extend(group.get("task_ids", []))
 
-            print(f"    {C.DIM}Generating milestone for tasks {task_ids[0]}-{task_ids[-1]}...{C.NC}", end=" ", flush=True)
+    current_order = [s["id"] for s in stories]
+    reorder_needed = suggested_order != current_order and set(suggested_order) == set(current_order)
 
-            claude_milestone = generate_milestone_with_claude(
-                project_dir, prd_title, batch, milestone_num
-            )
+    for i, group in enumerate(analysis, 1):
+        title = group.get("title", f"Milestone {i}")
+        desc = group.get("description", "")
+        task_ids = group.get("task_ids", [])
 
-            if claude_milestone:
-                milestone = {
-                    "id": f"M{milestone_num:02d}",
-                    "title": claude_milestone.get("title", f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}"),
-                    "description": claude_milestone.get("description", ""),
-                    "status": "open",
-                    "category": "milestone",
-                    "dependencies": task_ids
-                }
-                print(f"{C.MINT}✓{C.NC}")
-            else:
-                milestone = {
-                    "id": f"M{milestone_num:02d}",
-                    "title": f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}",
-                    "description": f"Review and verify implementation progress.\n\nTasks completed:\n" +
-                                  "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
-                    "status": "open",
-                    "category": "milestone",
-                    "dependencies": task_ids
-                }
-                print(f"{C.YELLOW}(fallback){C.NC}")
+        print(f"    {C.PINK}M{i:02d}{C.NC}: {title}")
+        if desc:
+            print(f"        {C.DIM}{desc[:60]}{'...' if len(desc) > 60 else ''}{C.NC}")
+        print(f"        {C.DIM}Tasks:{C.NC} {', '.join(task_ids)}")
+        for tid in task_ids:
+            task = task_by_id.get(tid)
+            if task:
+                print(f"          {C.SAGE}{tid}{C.NC}: {task['title']}")
+        print()
 
-            milestones_to_add.append((milestone, task_ids[-1]))
-            milestone_num += 1
+    if reorder_needed:
+        print(f"  {C.YELLOW}Claude suggests reordering tasks:{C.NC}")
+        print(f"    {C.DIM}Current:{C.NC}  {' → '.join(current_order)}")
+        print(f"    {C.DIM}Suggested:{C.NC} {' → '.join(suggested_order)}")
+        print()
 
-        # Add final milestone if there are remaining tasks
-        remaining = len(stories) % milestone_interval
-        if remaining > 0:
-            batch = stories[-remaining:]
-            task_ids = [t["id"] for t in batch]
+    # Confirm with user
+    if not getattr(args, 'force', False):
+        prompt_text = "Apply these milestones"
+        if reorder_needed:
+            prompt_text += " and reorder tasks"
+        try:
+            reply = input(f"  {C.YELLOW}{prompt_text}? [y/N]{C.NC} ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
 
-            print(f"    {C.DIM}Generating final milestone...{C.NC}", end=" ", flush=True)
+        if reply not in ("y", "yes"):
+            print()
+            print(f"  {C.DIM}Cancelled.{C.NC}")
+            print()
+            return
 
-            claude_milestone = generate_milestone_with_claude(
-                project_dir, prd_title, batch, milestone_num
-            )
+    # Reorder tasks if suggested
+    if reorder_needed:
+        reordered_stories = []
+        for tid in suggested_order:
+            if tid in task_by_id:
+                reordered_stories.append(task_by_id[tid])
+        prd["stories"] = reordered_stories
+        stories = reordered_stories
+        print()
+        print(f"  {C.MINT}✓ Reordered tasks{C.NC}")
 
-            if claude_milestone:
-                milestone = {
-                    "id": f"M{milestone_num:02d}",
-                    "title": claude_milestone.get("title", "Milestone: Final review"),
-                    "description": claude_milestone.get("description", ""),
-                    "status": "open",
-                    "category": "milestone",
-                    "dependencies": task_ids
-                }
-                print(f"{C.MINT}✓{C.NC}")
-            else:
-                milestone = {
-                    "id": f"M{milestone_num:02d}",
-                    "title": f"Milestone: Final review",
-                    "description": f"Final review and verification.\n\nTasks completed:\n" +
-                                  "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
-                    "status": "open",
-                    "category": "milestone",
-                    "dependencies": task_ids
-                }
-                print(f"{C.YELLOW}(fallback){C.NC}")
+    # Generate detailed milestones
+    print()
+    print(f"  {C.DIM}Generating milestone details...{C.NC}")
+    print()
 
-            milestones_to_add.append((milestone, task_ids[-1]))
+    milestones_to_add = []
+    for i, group in enumerate(analysis, 1):
+        task_ids = group.get("task_ids", [])
+        group_tasks = [task_by_id[tid] for tid in task_ids if tid in task_by_id]
+
+        if not group_tasks:
+            continue
+
+        print(f"    {C.DIM}Generating M{i:02d}...{C.NC}", end=" ", flush=True)
+
+        # Try to generate detailed milestone with Claude
+        claude_milestone = generate_milestone_with_claude(
+            project_dir, prd_title, group_tasks, i, group.get("title")
+        )
+
+        if claude_milestone:
+            milestone = {
+                "id": f"M{i:02d}",
+                "title": claude_milestone.get("title", group.get("title", f"Milestone {i}")),
+                "description": claude_milestone.get("description", group.get("description", "")),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            print(f"{C.MINT}✓{C.NC}")
+        else:
+            # Use the analysis suggestion as fallback
+            milestone = {
+                "id": f"M{i:02d}",
+                "title": group.get("title", f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}"),
+                "description": group.get("description", "") + "\n\nTasks:\n" +
+                              "\n".join(f"- {t['id']}: {t['title']}" for t in group_tasks),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            print(f"{C.YELLOW}(using analysis){C.NC}")
+
+        last_task_id = task_ids[-1] if task_ids else None
+        milestones_to_add.append((milestone, last_task_id))
 
     print()
 
