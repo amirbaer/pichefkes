@@ -1809,7 +1809,7 @@ def cmd_new(args, project_dir: Path):
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Next steps:{C.NC}")
     print(f"    {C.SAGE}ralph add \"Task title\"{C.NC}       {C.DIM}Add tasks{C.NC}")
-    print(f"    {C.SAGE}ralph compile{C.NC}                {C.DIM}Add milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone compile{C.NC}      {C.DIM}Add milestones{C.NC}")
     print(f"    {C.SAGE}ralph run{C.NC}                    {C.DIM}Execute tasks{C.NC}")
     print()
 
@@ -2134,6 +2134,50 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
     print()
 
 
+def cmd_clear(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Remove all milestones from the current PRD."""
+    stories = prd.get("stories", [])
+
+    # Find existing milestones
+    milestones = [s for s in stories if is_milestone_task(s)]
+
+    if not milestones:
+        print(f"  {C.DIM}No milestones to clear{C.NC}")
+        print()
+        return
+
+    print(f"  {C.BOLD}{C.LAVENDER}Milestones to remove:{C.NC}")
+    print()
+    for ms in milestones:
+        status_icon = "✓" if ms.get("status") == "completed" else "○"
+        print(f"    {C.PINK}{ms['id']}{C.NC}: {ms['title']} {C.DIM}[{status_icon}]{C.NC}")
+    print()
+
+    # Confirm unless --force
+    if not getattr(args, 'force', False):
+        try:
+            reply = input(f"  {C.YELLOW}Remove {len(milestones)} milestone(s)? [y/N]{C.NC} ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+        if reply not in ("y", "yes"):
+            print()
+            print(f"  {C.DIM}Keeping milestones.{C.NC}")
+            print()
+            return
+
+    # Remove milestones
+    prd["stories"] = [s for s in stories if not is_milestone_task(s)]
+    save_prd(prd_file, prd)
+
+    print()
+    print(f"  {C.MINT}✓ Removed {len(milestones)} milestone(s){C.NC}")
+    print()
+
+
 # ═══════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════
@@ -2172,9 +2216,6 @@ def print_usage():
         f"    {C.MINT}add{C.NC}             {C.DIM}Add a task to current run{C.NC}"
     )
     print(
-        f"    {C.MINT}compile{C.NC}         {C.DIM}Add milestones and finalize PRD{C.NC}"
-    )
-    print(
         f"    {C.MINT}run{C.NC}             {C.DIM}Execute PRD tasks{C.NC}"
     )
     print(
@@ -2183,7 +2224,7 @@ def print_usage():
     print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
     print(f"    {C.MINT}show{C.NC}            {C.DIM}Show details of a run{C.NC}")
     print(
-        f"    {C.MINT}milestone{C.NC}       {C.DIM}Manage milestones{C.NC}"
+        f"    {C.MINT}milestone{C.NC}       {C.DIM}Manage milestones (compile, clear, <id>){C.NC}"
     )
     print(
         f"    {C.MINT}install{C.NC}         {C.DIM}Install ralph in a project{C.NC}"
@@ -2210,7 +2251,11 @@ def print_usage():
     print(f"  {C.DIM}Creating runs:{C.NC}")
     print(f"    {C.SAGE}ralph new \"Feature X\"{C.NC}    {C.DIM}Create a new run{C.NC}")
     print(f"    {C.SAGE}ralph add \"Task title\"{C.NC}   {C.DIM}Add task to current run{C.NC}")
-    print(f"    {C.SAGE}ralph compile{C.NC}            {C.DIM}Add milestones{C.NC}")
+    print()
+    print(f"  {C.DIM}Milestones:{C.NC}")
+    print(f"    {C.SAGE}ralph milestone compile{C.NC}  {C.DIM}Add milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone clear{C.NC}    {C.DIM}Remove milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone{C.NC}          {C.DIM}List milestones{C.NC}")
     print()
     print(f"  {C.DIM}Executing:{C.NC}")
     print(f"    {C.SAGE}ralph run{C.NC}                {C.DIM}Execute tasks{C.NC}")
@@ -2221,7 +2266,6 @@ def print_usage():
     print(f"    {C.SAGE}ralph info{C.NC}               {C.DIM}Show current status{C.NC}")
     print(f"    {C.SAGE}ralph runs{C.NC}               {C.DIM}List all runs{C.NC}")
     print(f"    {C.SAGE}ralph show 1{C.NC}             {C.DIM}Show run details{C.NC}")
-    print(f"    {C.SAGE}ralph milestone{C.NC}          {C.DIM}List milestones{C.NC}")
     print()
 
 
@@ -2283,14 +2327,6 @@ def main():
             sys.exit(1)
         prd = load_prd(prd_file)
         cmd_add(args, project_dir, prd_file, prd)
-    elif command == "compile":
-        if not prd_file:
-            print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
-            print(f"  {C.DIM}Create one with: ralph new \"Run Title\"{C.NC}")
-            print()
-            sys.exit(1)
-        prd = load_prd(prd_file)
-        cmd_compile(args, project_dir, prd_file, prd)
     elif command in ("run", "info", "milestone"):
         if not prd_file:
             print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
@@ -2301,7 +2337,14 @@ def main():
         if command == "run":
             cmd_run(args, project_dir, prd_file, prd)
         elif command == "milestone":
-            cmd_milestone(args, project_dir, prd_file, prd, args.subarg, args.subarg2)
+            # Handle milestone subcommands: compile, clear, or <id>
+            subarg = args.subarg
+            if subarg == "compile":
+                cmd_compile(args, project_dir, prd_file, prd)
+            elif subarg == "clear":
+                cmd_clear(args, project_dir, prd_file, prd)
+            else:
+                cmd_milestone(args, project_dir, prd_file, prd, subarg, args.subarg2)
         else:
             cmd_info(args, project_dir, prd_file, prd)
     else:
