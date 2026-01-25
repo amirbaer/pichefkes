@@ -1102,6 +1102,7 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
 
         # Description (fallback if no steps found)
         desc = milestone.get("description", "")
+        has_verification_commands = "```" in desc  # Track if description has code blocks
         if desc:
             print(f"  {C.BOLD}{C.LAVENDER}Description:{C.NC}")
             print()
@@ -1166,26 +1167,27 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
             print(f"  {C.DIM}{'─' * 55}{C.NC}")
             print()
 
-        # Manual verification commands
-        print(f"  {C.BOLD}{C.LAVENDER}Manual Verification Commands:{C.NC}")
-        print()
-        print(f"  {C.DIM}View this milestone in PRD:{C.NC}")
-        print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | jq '.stories[] | select(.id==\"{milestone_id}\")'{C.NC}")
-        print()
-        print(f"  {C.DIM}View progress log:{C.NC}")
-        run_dir = get_run_dir(prd_file)
-        if run_dir:
-            progress_file = run_dir / "progress.txt"
-            print(f"    {C.SAGE}cat {progress_file.relative_to(project_dir)}{C.NC}")
-        else:
-            print(f"    {C.SAGE}cat .ralph/progress.txt{C.NC}")
-        print()
-        print(f"  {C.DIM}View git log for recent changes:{C.NC}")
-        print(f"    {C.SAGE}git log --oneline -20{C.NC}")
-        print()
-        print(f"  {C.DIM}Check file changes:{C.NC}")
-        print(f"    {C.SAGE}git diff HEAD~5 --stat{C.NC}")
-        print()
+        # Only show generic commands if description lacks specific verification
+        if not has_verification_commands:
+            print(f"  {C.BOLD}{C.LAVENDER}Manual Verification Commands:{C.NC}")
+            print()
+            print(f"  {C.DIM}View this milestone in PRD:{C.NC}")
+            print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | jq '.stories[] | select(.id==\"{milestone_id}\")'{C.NC}")
+            print()
+            print(f"  {C.DIM}View progress log:{C.NC}")
+            run_dir = get_run_dir(prd_file)
+            if run_dir:
+                progress_file = run_dir / "progress.txt"
+                print(f"    {C.SAGE}cat {progress_file.relative_to(project_dir)}{C.NC}")
+            else:
+                print(f"    {C.SAGE}cat .ralph/progress.txt{C.NC}")
+            print()
+            print(f"  {C.DIM}View git log for recent changes:{C.NC}")
+            print(f"    {C.SAGE}git log --oneline -20{C.NC}")
+            print()
+            print(f"  {C.DIM}Check file changes:{C.NC}")
+            print(f"    {C.SAGE}git diff HEAD~5 --stat{C.NC}")
+            print()
 
         if status == "completed" and not verified:
             print(f"  {C.BOLD}{C.YELLOW}To mark as verified:{C.NC}")
@@ -1936,7 +1938,7 @@ def generate_milestone_with_claude(project_dir: Path, prd_title: str, tasks: lis
     """Use Claude to generate a milestone with verification steps."""
     tasks_json = json.dumps(tasks, indent=2)
 
-    prompt = f"""Generate a milestone for a development PRD.
+    prompt = f"""Generate a milestone for a development PRD with CONTENT-SPECIFIC verification steps.
 
 Project directory: {project_dir}
 PRD Title: {prd_title}
@@ -1947,15 +1949,35 @@ Tasks to verify:
 
 Generate a milestone JSON object with:
 1. A concise, meaningful title (not just "Review X tasks")
-2. A description with verification steps that include:
-   - ## section headers for each verification step
-   - ```bash code blocks with actual commands to verify the work
-   - Commands should be specific to what was implemented
+2. A description with SPECIFIC verification steps that actually check the work was done correctly
 
-Example format:
+IMPORTANT: Verification must check CONTENT, not just existence. For each task type:
+
+For CODE tasks:
+- Run the actual code to verify it works
+- Run specific tests that exercise the new functionality
+- Check edge cases mentioned in the task
+
+For RESEARCH/DOCUMENTATION tasks:
+- List specific files that should exist
+- Use grep/cat to verify the content addresses the specific questions asked
+- Check that key topics/terms are covered
+
+For CONFIGURATION tasks:
+- Run commands that exercise the new configuration
+- Verify settings are correct
+
+Format each verification step as:
+## Step Title
+Brief explanation of what we're checking
+```bash
+actual command that verifies the content
+```
+
+Example for a research task:
 {{
-  "title": "Milestone: Parser Implementation Complete",
-  "description": "Verify the parser handles all sentence types correctly.\\n\\n## Test Basic Parsing\\n```bash\\npython3 -c \\"from src.parser import parse; print(parse('The dog runs'))\\\"\\n```\\n\\n## Run Parser Tests\\n```bash\\npytest tests/test_parser.py -v\\n```"
+  "title": "Milestone: Research Foundations Complete",
+  "description": "Verify research covers required topics.\\n\\n## Check Research Folder Exists\\n```bash\\nls -la docs/research/\\n```\\n\\n## Verify Ogden's Basic English Coverage\\nCheck that the research addresses Ogden's 850 word list and its goals\\n```bash\\ngrep -l 'Ogden\\|Basic English\\|850' docs/research/*.md\\n```\\n\\n## Verify Problems Identified\\nConfirm the research documents what problems these approaches tried to solve\\n```bash\\ngrep -A5 'problem' docs/research/*.md | head -30\\n```"
 }}
 
 Return ONLY the JSON object, no other text.
