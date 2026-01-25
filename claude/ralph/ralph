@@ -1861,8 +1861,67 @@ def cmd_add(args, project_dir: Path, prd_file: Path, prd: dict):
 # ═══════════════════════════════════════════════════════════════════
 
 
+def generate_milestone_with_claude(project_dir: Path, prd_title: str, tasks: list, milestone_num: int, category: str | None = None) -> dict | None:
+    """Use Claude to generate a milestone with verification steps."""
+    tasks_json = json.dumps(tasks, indent=2)
+
+    prompt = f"""Generate a milestone for a development PRD.
+
+Project directory: {project_dir}
+PRD Title: {prd_title}
+{f'Category: {category}' if category else ''}
+
+Tasks to verify:
+{tasks_json}
+
+Generate a milestone JSON object with:
+1. A concise, meaningful title (not just "Review X tasks")
+2. A description with verification steps that include:
+   - ## section headers for each verification step
+   - ```bash code blocks with actual commands to verify the work
+   - Commands should be specific to what was implemented
+
+Example format:
+{{
+  "title": "Milestone: Parser Implementation Complete",
+  "description": "Verify the parser handles all sentence types correctly.\\n\\n## Test Basic Parsing\\n```bash\\npython3 -c \\"from src.parser import parse; print(parse('The dog runs'))\\\"\\n```\\n\\n## Run Parser Tests\\n```bash\\npytest tests/test_parser.py -v\\n```"
+}}
+
+Return ONLY the JSON object, no other text.
+"""
+
+    try:
+        result = subprocess.run(
+            ["claude", "--print", "-p", prompt],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=project_dir,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        # Parse the JSON from Claude's response
+        response = result.stdout.strip()
+
+        # Try to extract JSON from response
+        import re
+        json_match = re.search(r'\{[^{}]*"title"[^{}]*"description"[^{}]*\}', response, re.DOTALL)
+        if json_match:
+            milestone_data = json.loads(json_match.group())
+            return milestone_data
+
+        # Try parsing the whole response as JSON
+        milestone_data = json.loads(response)
+        return milestone_data
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
+
+
 def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
-    """Add milestones to PRD and finalize for execution."""
+    """Add milestones to PRD using Claude to generate verification steps."""
     stories = prd.get("stories", [])
 
     if not stories:
@@ -1873,18 +1932,29 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
 
     # Check if already has milestones
     existing_milestones = [s for s in stories if is_milestone_task(s)]
-    if existing_milestones and not getattr(args, 'force', False):
-        print(f"  {C.YELLOW}PRD already has {len(existing_milestones)} milestone(s){C.NC}")
+    if existing_milestones:
+        print(f"  {C.YELLOW}PRD already has {len(existing_milestones)} milestone(s):{C.NC}")
         print()
         for ms in existing_milestones:
             print(f"    {C.PINK}{ms['id']}{C.NC}: {ms['title']}")
         print()
-        print(f"  {C.DIM}Use --force to regenerate milestones{C.NC}")
-        print()
-        return
 
-    # Remove existing milestones if --force
-    if existing_milestones and getattr(args, 'force', False):
+        if not getattr(args, 'force', False):
+            try:
+                reply = input(f"  {C.YELLOW}Re-compile and regenerate milestones? [y/N]{C.NC} ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                print(f"  {C.PEACH}Cancelled.{C.NC}")
+                print()
+                return
+
+            if reply not in ("y", "yes"):
+                print()
+                print(f"  {C.DIM}Keeping existing milestones.{C.NC}")
+                print()
+                return
+
+        # Remove existing milestones
         prd["stories"] = [s for s in stories if not is_milestone_task(s)]
         stories = prd["stories"]
         print(f"  {C.DIM}Removed {len(existing_milestones)} existing milestone(s){C.NC}")
@@ -1910,6 +1980,10 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
 
     milestones_to_add = []
     milestone_num = 1
+    prd_title = get_prd_title(prd)
+
+    print(f"  {C.DIM}Generating milestones with Claude...{C.NC}")
+    print()
 
     if by_category and len(categories) > 1:
         # Add milestone after each category
@@ -1920,15 +1994,36 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
             task_ids = [t["id"] for t in tasks]
             last_task_id = task_ids[-1]
 
-            milestone = {
-                "id": f"M{milestone_num:02d}",
-                "title": f"Milestone: Review {cat} tasks",
-                "description": f"Review and verify the {cat} implementation.\n\nTasks completed:\n" +
-                              "\n".join(f"- {t['id']}: {t['title']}" for t in tasks),
-                "status": "open",
-                "category": "milestone",
-                "dependencies": task_ids
-            }
+            print(f"    {C.DIM}Generating milestone for {cat}...{C.NC}", end=" ", flush=True)
+
+            # Try to generate with Claude
+            claude_milestone = generate_milestone_with_claude(
+                project_dir, prd_title, tasks, milestone_num, cat
+            )
+
+            if claude_milestone:
+                milestone = {
+                    "id": f"M{milestone_num:02d}",
+                    "title": claude_milestone.get("title", f"Milestone: Review {cat}"),
+                    "description": claude_milestone.get("description", ""),
+                    "status": "open",
+                    "category": "milestone",
+                    "dependencies": task_ids
+                }
+                print(f"{C.MINT}✓{C.NC}")
+            else:
+                # Fallback to generic milestone
+                milestone = {
+                    "id": f"M{milestone_num:02d}",
+                    "title": f"Milestone: Review {cat} tasks",
+                    "description": f"Review and verify the {cat} implementation.\n\nTasks completed:\n" +
+                                  "\n".join(f"- {t['id']}: {t['title']}" for t in tasks),
+                    "status": "open",
+                    "category": "milestone",
+                    "dependencies": task_ids
+                }
+                print(f"{C.YELLOW}(fallback){C.NC}")
+
             milestones_to_add.append((milestone, last_task_id))
             milestone_num += 1
     else:
@@ -1937,15 +2032,34 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
             batch = stories[max(0, i - milestone_interval):i]
             task_ids = [t["id"] for t in batch]
 
-            milestone = {
-                "id": f"M{milestone_num:02d}",
-                "title": f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}",
-                "description": f"Review and verify implementation progress.\n\nTasks completed:\n" +
-                              "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
-                "status": "open",
-                "category": "milestone",
-                "dependencies": task_ids
-            }
+            print(f"    {C.DIM}Generating milestone for tasks {task_ids[0]}-{task_ids[-1]}...{C.NC}", end=" ", flush=True)
+
+            claude_milestone = generate_milestone_with_claude(
+                project_dir, prd_title, batch, milestone_num
+            )
+
+            if claude_milestone:
+                milestone = {
+                    "id": f"M{milestone_num:02d}",
+                    "title": claude_milestone.get("title", f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}"),
+                    "description": claude_milestone.get("description", ""),
+                    "status": "open",
+                    "category": "milestone",
+                    "dependencies": task_ids
+                }
+                print(f"{C.MINT}✓{C.NC}")
+            else:
+                milestone = {
+                    "id": f"M{milestone_num:02d}",
+                    "title": f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}",
+                    "description": f"Review and verify implementation progress.\n\nTasks completed:\n" +
+                                  "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
+                    "status": "open",
+                    "category": "milestone",
+                    "dependencies": task_ids
+                }
+                print(f"{C.YELLOW}(fallback){C.NC}")
+
             milestones_to_add.append((milestone, task_ids[-1]))
             milestone_num += 1
 
@@ -1955,16 +2069,37 @@ def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
             batch = stories[-remaining:]
             task_ids = [t["id"] for t in batch]
 
-            milestone = {
-                "id": f"M{milestone_num:02d}",
-                "title": f"Milestone: Final review",
-                "description": f"Final review and verification.\n\nTasks completed:\n" +
-                              "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
-                "status": "open",
-                "category": "milestone",
-                "dependencies": task_ids
-            }
+            print(f"    {C.DIM}Generating final milestone...{C.NC}", end=" ", flush=True)
+
+            claude_milestone = generate_milestone_with_claude(
+                project_dir, prd_title, batch, milestone_num
+            )
+
+            if claude_milestone:
+                milestone = {
+                    "id": f"M{milestone_num:02d}",
+                    "title": claude_milestone.get("title", "Milestone: Final review"),
+                    "description": claude_milestone.get("description", ""),
+                    "status": "open",
+                    "category": "milestone",
+                    "dependencies": task_ids
+                }
+                print(f"{C.MINT}✓{C.NC}")
+            else:
+                milestone = {
+                    "id": f"M{milestone_num:02d}",
+                    "title": f"Milestone: Final review",
+                    "description": f"Final review and verification.\n\nTasks completed:\n" +
+                                  "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
+                    "status": "open",
+                    "category": "milestone",
+                    "dependencies": task_ids
+                }
+                print(f"{C.YELLOW}(fallback){C.NC}")
+
             milestones_to_add.append((milestone, task_ids[-1]))
+
+    print()
 
     # Insert milestones into the stories list
     for milestone, after_task_id in milestones_to_add:
