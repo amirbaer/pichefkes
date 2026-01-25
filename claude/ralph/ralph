@@ -1606,6 +1606,409 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
 
 
 # ═══════════════════════════════════════════════════════════════════
+# STAGE COMMAND - Create/manage PRD stages
+# ═══════════════════════════════════════════════════════════════════
+
+
+def get_next_run_number(project_dir: Path) -> int:
+    """Get the next available run number."""
+    runs_dir = project_dir / ".ralph" / "runs"
+    if not runs_dir.exists():
+        return 1
+
+    max_num = 0
+    for d in runs_dir.iterdir():
+        if d.is_dir() and d.name.startswith("run-"):
+            try:
+                num = int(d.name.split("-")[1])
+                max_num = max(max_num, num)
+            except (ValueError, IndexError):
+                pass
+    return max_num + 1
+
+
+def get_next_task_id(prd: dict) -> str:
+    """Get the next available task ID (e.g., '013' if last was '012')."""
+    max_num = 0
+    for story in prd.get("stories", []):
+        task_id = story.get("id", "")
+        # Skip milestone IDs (start with M)
+        if task_id.startswith("M"):
+            continue
+        try:
+            num = int(task_id)
+            max_num = max(max_num, num)
+        except ValueError:
+            pass
+    return f"{max_num + 1:03d}"
+
+
+def slugify(text: str) -> str:
+    """Convert text to a slug for directory names."""
+    import re
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\s-]', '', text)
+    text = re.sub(r'[\s_]+', '-', text)
+    text = re.sub(r'-+', '-', text)
+    return text.strip('-')[:40]
+
+
+def cmd_stage(args, project_dir: Path, prd_file: Path | None, prd: dict | None):
+    """Create a new stage or add tasks to existing PRD."""
+    subcommand = args.subarg or "list"
+
+    if subcommand == "new":
+        # Create a new run/stage
+        title = args.subarg2
+        if not title:
+            print(f"  {C.CORAL}Error: Please provide a title{C.NC}")
+            print(f"  {C.DIM}Usage: ralph stage new \"Stage Title\"{C.NC}")
+            print()
+            return
+
+        run_num = get_next_run_number(project_dir)
+        slug = slugify(title)
+        run_name = f"run-{run_num:03d}-{slug}"
+        run_dir = project_dir / ".ralph" / "runs" / run_name
+
+        # Create directory
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create PRD
+        new_prd = {
+            "id": f"{run_num:03d}",
+            "title": title,
+            "created": datetime.now().strftime("%Y-%m-%d"),
+            "status": "active",
+            "description": "",
+            "stories": []
+        }
+
+        prd_path = run_dir / "prd.json"
+        save_prd(prd_path, new_prd)
+
+        # Create empty progress file
+        (run_dir / "progress.txt").write_text(f"# Progress Log: {title}\n\n")
+
+        # Mark any other active PRDs as paused
+        runs_dir = project_dir / ".ralph" / "runs"
+        for d in runs_dir.iterdir():
+            if d.is_dir() and d != run_dir:
+                other_prd_file = d / "prd.json"
+                if other_prd_file.exists():
+                    try:
+                        other_prd = load_prd(other_prd_file)
+                        if other_prd.get("status") == "active":
+                            other_prd["status"] = "paused"
+                            save_prd(other_prd_file, other_prd)
+                    except (json.JSONDecodeError, OSError):
+                        pass
+
+        print(f"  {C.MINT}✓ Created new stage:{C.NC} {C.SAGE}{run_name}{C.NC}")
+        print()
+        print(f"  {C.DIM}PRD:{C.NC} {C.SAGE}{prd_path.relative_to(project_dir)}{C.NC}")
+        print()
+        print(f"  {C.BOLD}{C.LAVENDER}Next steps:{C.NC}")
+        print(f"    {C.SAGE}ralph stage add \"Task title\"{C.NC}  {C.DIM}Add tasks{C.NC}")
+        print(f"    {C.SAGE}ralph compile{C.NC}                 {C.DIM}Add milestones and finalize{C.NC}")
+        print()
+        return
+
+    elif subcommand == "add":
+        # Add a task to current PRD
+        if not prd_file or not prd:
+            print(f"  {C.CORAL}Error: No active PRD found{C.NC}")
+            print(f"  {C.DIM}Create one with: ralph stage new \"Stage Title\"{C.NC}")
+            print()
+            return
+
+        title = args.subarg2
+        if not title:
+            print(f"  {C.CORAL}Error: Please provide a task title{C.NC}")
+            print(f"  {C.DIM}Usage: ralph stage add \"Task title\"{C.NC}")
+            print()
+            return
+
+        # Get description from --desc or prompt
+        description = getattr(args, 'desc', '') or ""
+        category = getattr(args, 'category', '') or ""
+
+        task_id = get_next_task_id(prd)
+
+        new_task = {
+            "id": task_id,
+            "title": title,
+            "description": description,
+            "status": "open",
+            "dependencies": []
+        }
+
+        if category:
+            new_task["category"] = category
+
+        prd["stories"].append(new_task)
+        save_prd(prd_file, prd)
+
+        print(f"  {C.MINT}✓ Added task {task_id}:{C.NC} {C.SAGE}{title}{C.NC}")
+        if description:
+            print(f"    {C.DIM}{description[:60]}{'...' if len(description) > 60 else ''}{C.NC}")
+        if category:
+            print(f"    {C.DIM}Category: {category}{C.NC}")
+        print()
+
+        # Show current task count
+        counts = count_tasks_by_status(prd)
+        print(f"  {C.DIM}Total tasks:{C.NC} {C.SAGE}{counts['total']}{C.NC}")
+        print()
+        return
+
+    elif subcommand == "list" or subcommand == "show":
+        # List current tasks
+        if not prd_file or not prd:
+            print(f"  {C.DIM}No active PRD found{C.NC}")
+            print(f"  {C.DIM}Create one with: ralph stage new \"Stage Title\"{C.NC}")
+            print()
+            return
+
+        print(f"  {C.BOLD}{C.LAVENDER}Stage:{C.NC} {C.SAGE}{get_prd_title(prd)}{C.NC}")
+        print(f"  {C.DIM}File:{C.NC} {C.SAGE}{prd_file.relative_to(project_dir)}{C.NC}")
+        print(f"  {C.DIM}Status:{C.NC} {C.SAGE}{prd.get('status', 'unknown')}{C.NC}")
+        print()
+
+        stories = prd.get("stories", [])
+        if not stories:
+            print(f"  {C.DIM}No tasks yet. Add some:{C.NC}")
+            print(f"    {C.SAGE}ralph stage add \"Task title\"{C.NC}")
+            print()
+            return
+
+        # Group by category if available
+        by_category = {}
+        for story in stories:
+            cat = story.get("category", "uncategorized")
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(story)
+
+        for cat, tasks in by_category.items():
+            if len(by_category) > 1:
+                print(f"  {C.YELLOW}{cat}{C.NC}")
+            for task in tasks:
+                status_icon = "✓" if task.get("status") == "completed" else "○"
+                is_ms = is_milestone_task(task)
+                ms_marker = f" {C.PINK}[M]{C.NC}" if is_ms else ""
+                print(f"    {status_icon} {C.PINK}{task['id']}{C.NC}: {task['title']}{ms_marker}")
+            print()
+
+        counts = count_tasks_by_status(prd)
+        print(f"  {C.DIM}Total:{C.NC} {counts['total']} tasks ({counts['open']} open, {counts['completed']} completed)")
+
+        # Check for milestones
+        milestones = [s for s in stories if is_milestone_task(s)]
+        if not milestones:
+            print(f"  {C.YELLOW}⚠ No milestones yet.{C.NC} Run {C.SAGE}ralph compile{C.NC} to add them.")
+        print()
+        return
+
+    elif subcommand == "desc":
+        # Set description for a task
+        task_id = args.subarg2
+        if not task_id:
+            print(f"  {C.CORAL}Error: Please provide a task ID{C.NC}")
+            print(f"  {C.DIM}Usage: ralph stage desc 001 \"Description text\"{C.NC}")
+            print()
+            return
+
+        if not prd_file or not prd:
+            print(f"  {C.CORAL}Error: No active PRD found{C.NC}")
+            print()
+            return
+
+        # Find the task
+        task = next((s for s in prd.get("stories", []) if s["id"] == task_id), None)
+        if not task:
+            print(f"  {C.CORAL}Error: Task {task_id} not found{C.NC}")
+            print()
+            return
+
+        # Get description from remaining args or prompt
+        desc = getattr(args, 'desc', '') or ""
+        if not desc:
+            print(f"  {C.DIM}Enter description (end with empty line):{C.NC}")
+            lines = []
+            while True:
+                try:
+                    line = input("  ")
+                    if not line:
+                        break
+                    lines.append(line)
+                except (KeyboardInterrupt, EOFError):
+                    print()
+                    return
+            desc = "\n".join(lines)
+
+        task["description"] = desc
+        save_prd(prd_file, prd)
+
+        print(f"  {C.MINT}✓ Updated description for task {task_id}{C.NC}")
+        print()
+        return
+
+    else:
+        print(f"  {C.CORAL}Unknown subcommand: {subcommand}{C.NC}")
+        print()
+        print(f"  {C.BOLD}{C.LAVENDER}Stage commands:{C.NC}")
+        print(f"    {C.SAGE}ralph stage new \"Title\"{C.NC}     {C.DIM}Create a new stage{C.NC}")
+        print(f"    {C.SAGE}ralph stage add \"Task\"{C.NC}      {C.DIM}Add a task to current stage{C.NC}")
+        print(f"    {C.SAGE}ralph stage list{C.NC}             {C.DIM}Show current tasks{C.NC}")
+        print(f"    {C.SAGE}ralph stage desc 001{C.NC}         {C.DIM}Set description for task{C.NC}")
+        print()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# COMPILE COMMAND - Add milestones and finalize PRD
+# ═══════════════════════════════════════════════════════════════════
+
+
+def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Add milestones to PRD and finalize for execution."""
+    stories = prd.get("stories", [])
+
+    if not stories:
+        print(f"  {C.CORAL}Error: No tasks in PRD{C.NC}")
+        print(f"  {C.DIM}Add tasks with: ralph stage add \"Task title\"{C.NC}")
+        print()
+        return
+
+    # Check if already has milestones
+    existing_milestones = [s for s in stories if is_milestone_task(s)]
+    if existing_milestones and not getattr(args, 'force', False):
+        print(f"  {C.YELLOW}PRD already has {len(existing_milestones)} milestone(s){C.NC}")
+        print()
+        for ms in existing_milestones:
+            print(f"    {C.PINK}{ms['id']}{C.NC}: {ms['title']}")
+        print()
+        print(f"  {C.DIM}Use --force to regenerate milestones{C.NC}")
+        print()
+        return
+
+    # Remove existing milestones if --force
+    if existing_milestones and getattr(args, 'force', False):
+        prd["stories"] = [s for s in stories if not is_milestone_task(s)]
+        stories = prd["stories"]
+        print(f"  {C.DIM}Removed {len(existing_milestones)} existing milestone(s){C.NC}")
+        print()
+
+    # Get configuration
+    milestone_interval = getattr(args, 'interval', 5) or 5  # Default: every 5 tasks
+    by_category = getattr(args, 'by_category', True)  # Default: milestone per category
+
+    print(f"  {C.BOLD}{C.LAVENDER}Compiling PRD:{C.NC} {C.SAGE}{get_prd_title(prd)}{C.NC}")
+    print()
+    print(f"  {C.DIM}Tasks:{C.NC} {len(stories)}")
+    print(f"  {C.DIM}Strategy:{C.NC} {'By category' if by_category else f'Every {milestone_interval} tasks'}")
+    print()
+
+    # Group tasks by category
+    categories = {}
+    for story in stories:
+        cat = story.get("category", "general")
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(story)
+
+    milestones_to_add = []
+    milestone_num = 1
+
+    if by_category and len(categories) > 1:
+        # Add milestone after each category
+        for cat, tasks in categories.items():
+            if not tasks:
+                continue
+
+            task_ids = [t["id"] for t in tasks]
+            last_task_id = task_ids[-1]
+
+            milestone = {
+                "id": f"M{milestone_num:02d}",
+                "title": f"Milestone: Review {cat} tasks",
+                "description": f"Review and verify the {cat} implementation.\n\nTasks completed:\n" +
+                              "\n".join(f"- {t['id']}: {t['title']}" for t in tasks),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            milestones_to_add.append((milestone, last_task_id))
+            milestone_num += 1
+    else:
+        # Add milestone every N tasks
+        for i in range(milestone_interval, len(stories) + 1, milestone_interval):
+            batch = stories[max(0, i - milestone_interval):i]
+            task_ids = [t["id"] for t in batch]
+
+            milestone = {
+                "id": f"M{milestone_num:02d}",
+                "title": f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}",
+                "description": f"Review and verify implementation progress.\n\nTasks completed:\n" +
+                              "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            milestones_to_add.append((milestone, task_ids[-1]))
+            milestone_num += 1
+
+        # Add final milestone if there are remaining tasks
+        remaining = len(stories) % milestone_interval
+        if remaining > 0:
+            batch = stories[-remaining:]
+            task_ids = [t["id"] for t in batch]
+
+            milestone = {
+                "id": f"M{milestone_num:02d}",
+                "title": f"Milestone: Final review",
+                "description": f"Final review and verification.\n\nTasks completed:\n" +
+                              "\n".join(f"- {t['id']}: {t['title']}" for t in batch),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            milestones_to_add.append((milestone, task_ids[-1]))
+
+    # Insert milestones into the stories list
+    for milestone, after_task_id in milestones_to_add:
+        # Find position after the specified task
+        insert_idx = len(prd["stories"])
+        for i, story in enumerate(prd["stories"]):
+            if story["id"] == after_task_id:
+                insert_idx = i + 1
+                break
+        prd["stories"].insert(insert_idx, milestone)
+
+    # Save the PRD
+    save_prd(prd_file, prd)
+
+    print(f"  {C.MINT}✓ Added {len(milestones_to_add)} milestone(s):{C.NC}")
+    print()
+    for milestone, _ in milestones_to_add:
+        deps_str = ", ".join(milestone["dependencies"][:3])
+        if len(milestone["dependencies"]) > 3:
+            deps_str += f"... +{len(milestone['dependencies']) - 3} more"
+        print(f"    {C.PINK}{milestone['id']}{C.NC}: {milestone['title']}")
+        print(f"        {C.DIM}depends on: {deps_str}{C.NC}")
+    print()
+
+    # Show summary
+    counts = count_tasks_by_status(prd)
+    print(f"  {C.BOLD}{C.LAVENDER}PRD Summary:{C.NC}")
+    print(f"    {C.DIM}Total tasks:{C.NC} {counts['total']}")
+    print(f"    {C.DIM}Milestones:{C.NC} {len(milestones_to_add)}")
+    print()
+    print(f"  {C.MINT}Ready to run:{C.NC} {C.SAGE}ralph run{C.NC}")
+    print()
+
+
+# ═══════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1637,6 +2040,12 @@ def print_usage():
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Commands:{C.NC}")
     print(
+        f"    {C.MINT}stage{C.NC}           {C.DIM}Create stages and add PRD tasks{C.NC}"
+    )
+    print(
+        f"    {C.MINT}compile{C.NC}         {C.DIM}Add milestones and finalize PRD{C.NC}"
+    )
+    print(
         f"    {C.MINT}run{C.NC}             {C.DIM}Run the iteration loop (execute PRD tasks){C.NC}"
     )
     print(
@@ -1666,28 +2075,24 @@ def print_usage():
     print(f"    {C.MINT}-h, --help{C.NC}      {C.DIM}Show this help{C.NC}")
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Examples:{C.NC}")
-    print(f"    {C.SAGE}ralph{C.NC}              {C.DIM}Show this help{C.NC}")
-    print(
-        f"    {C.SAGE}ralph run{C.NC}          {C.DIM}Run the iteration loop{C.NC}"
-    )
-    print(
-        f"    {C.SAGE}ralph run -y{C.NC}       {C.DIM}Run without confirmation{C.NC}"
-    )
-    print(
-        f"    {C.SAGE}ralph run -n 10{C.NC}    {C.DIM}Run up to 10 iterations{C.NC}"
-    )
-    print(
-        f"    {C.SAGE}ralph info{C.NC}         {C.DIM}Show current status{C.NC}"
-    )
-    print(f"    {C.SAGE}ralph runs{C.NC}         {C.DIM}List all runs{C.NC}")
-    print(f"    {C.SAGE}ralph milestone{C.NC}    {C.DIM}List all milestones{C.NC}")
-    print(f"    {C.SAGE}ralph milestone M1{C.NC} {C.DIM}Show verification steps for M1{C.NC}")
-    print(f"    {C.SAGE}ralph milestone M1 1{C.NC}  {C.DIM}Run step 1 of milestone M1{C.NC}")
-    print(
-        f"    {C.SAGE}ralph milestone M1 --skip{C.NC}  {C.DIM}Skip milestone M1{C.NC}"
-    )
-    print(f"    {C.SAGE}ralph run -s{C.NC}       {C.DIM}Run without milestone pauses{C.NC}")
-    print(f"    {C.SAGE}ralph install{C.NC}      {C.DIM}Install ralph in current dir{C.NC}")
+    print(f"    {C.SAGE}ralph{C.NC}                        {C.DIM}Show this help{C.NC}")
+    print()
+    print(f"  {C.DIM}Creating stages:{C.NC}")
+    print(f"    {C.SAGE}ralph stage new \"Feature X\"{C.NC}   {C.DIM}Create a new stage{C.NC}")
+    print(f"    {C.SAGE}ralph stage add \"Task title\"{C.NC}  {C.DIM}Add task to current stage{C.NC}")
+    print(f"    {C.SAGE}ralph stage list{C.NC}              {C.DIM}Show current tasks{C.NC}")
+    print(f"    {C.SAGE}ralph compile{C.NC}                 {C.DIM}Add milestones{C.NC}")
+    print()
+    print(f"  {C.DIM}Running:{C.NC}")
+    print(f"    {C.SAGE}ralph run{C.NC}                     {C.DIM}Run the iteration loop{C.NC}")
+    print(f"    {C.SAGE}ralph run -y{C.NC}                  {C.DIM}Run without confirmation{C.NC}")
+    print(f"    {C.SAGE}ralph run -n 10{C.NC}               {C.DIM}Run up to 10 iterations{C.NC}")
+    print()
+    print(f"  {C.DIM}Status:{C.NC}")
+    print(f"    {C.SAGE}ralph info{C.NC}                    {C.DIM}Show current status{C.NC}")
+    print(f"    {C.SAGE}ralph runs{C.NC}                    {C.DIM}List all runs{C.NC}")
+    print(f"    {C.SAGE}ralph milestone{C.NC}               {C.DIM}List all milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone M1{C.NC}            {C.DIM}Show milestone details{C.NC}")
     print()
 
 
@@ -1702,13 +2107,19 @@ def main():
     )
 
     parser.add_argument("command", nargs="?", default=None)
-    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>
-    parser.add_argument("subarg2", nargs="?", default=None)  # For milestone <id> <step>
+    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>, stage <subcommand>
+    parser.add_argument("subarg2", nargs="?", default=None)  # For milestone <id> <step>, stage add <title>
     parser.add_argument("-y", "--yes", action="store_true")
     parser.add_argument("-s", "--skip-milestones", action="store_true", dest="skip_milestones")
     parser.add_argument("--skip", action="store_true")  # For milestone <id> --skip
     parser.add_argument("-n", "--max", type=int, default=20, dest="max_iterations")
     parser.add_argument("-h", "--help", action="store_true")
+    parser.add_argument("--desc", type=str, default="")  # For stage add --desc
+    parser.add_argument("--category", "-c", type=str, default="")  # For stage add --category
+    parser.add_argument("--force", "-f", action="store_true")  # For compile --force
+    parser.add_argument("--interval", "-i", type=int, default=5)  # For compile --interval
+    parser.add_argument("--by-category", action="store_true", dest="by_category", default=True)
+    parser.add_argument("--no-category", action="store_false", dest="by_category")
 
     args = parser.parse_args()
 
@@ -1731,6 +2142,18 @@ def main():
         cmd_install(args, target_dir)
     elif command == "runs":
         cmd_runs(args, project_dir)
+    elif command == "stage":
+        # Stage command can work without existing PRD (for "new")
+        prd = load_prd(prd_file) if prd_file else None
+        cmd_stage(args, project_dir, prd_file, prd)
+    elif command == "compile":
+        if not prd_file:
+            print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
+            print(f"  {C.DIM}Create one with: ralph stage new \"Stage Title\"{C.NC}")
+            print()
+            sys.exit(1)
+        prd = load_prd(prd_file)
+        cmd_compile(args, project_dir, prd_file, prd)
     elif command in ("run", "info", "milestone"):
         if not prd_file:
             print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
