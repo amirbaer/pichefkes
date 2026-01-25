@@ -294,13 +294,14 @@ def extract_code_blocks(description: str) -> list:
     blocks = []
 
     # Find code blocks with their preceding section titles
-    # Look for ## Title followed by ```lang ... ```
-    pattern = r'## ([^\n]+)\n```(\w*)\n(.*?)```'
+    # Look for ## Title, optional explanation text, then ```lang ... ```
+    pattern = r'## ([^\n]+)\n([^`]*?)```(\w*)\n(.*?)```'
 
     for match in re.finditer(pattern, description, re.DOTALL):
         title = match.group(1).strip()
-        lang = match.group(2) or "bash"
-        code = match.group(3).strip()
+        explanation = match.group(2).strip()  # Optional text between title and code
+        lang = match.group(3) or "bash"
+        code = match.group(4).strip()
 
         if lang in ("bash", "sh", "shell", ""):
             # Parse commands, handling multi-line strings
