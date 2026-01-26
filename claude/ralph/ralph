@@ -828,41 +828,75 @@ Current stage in the development cycle.
     return True
 
 
-def apply_prereqs(project_dir: Path, blocks: list) -> Path:
+def apply_prereqs(project_dir: Path, blocks: list) -> tuple:
     """Apply Prerequisites step: cd commands, exports, detect venv.
 
-    Returns the working directory.
+    Looks for setup commands in:
+    1. A step titled "Prerequisites" (explicit)
+    2. The first step (step 1) as fallback
+
+    Returns (working_directory, venv_python_path or None).
     """
     cwd = project_dir
-    # Look for Prerequisites step
+    venv_python = None
+
+    def extract_setup_from_block(block):
+        """Extract cd, export, source commands from a block."""
+        nonlocal cwd, venv_python
+        for cmd in block["commands"]:
+            cmd = cmd.strip()
+            # Handle cd
+            if cmd.startswith("cd "):
+                new_dir = cmd[3:].strip()
+                if new_dir.startswith("/"):
+                    cwd = Path(new_dir)
+                else:
+                    cwd = project_dir / new_dir
+            # Handle export
+            elif cmd.startswith("export "):
+                var_part = cmd[7:].strip()
+                if "=" in var_part:
+                    var_name, var_value = var_part.split("=", 1)
+                    var_value = var_value.strip('"').strip("'")
+                    var_value = os.path.expandvars(var_value)
+                    os.environ[var_name] = var_value
+            # Handle source venv
+            elif cmd.startswith("source ") and "venv" in cmd:
+                # Will check if venv exists after we know cwd
+                pass
+
+    # First, look for explicit Prerequisites step
+    found_prereqs = False
     for block in blocks:
         if "prereq" in block["title"].lower():
-            for cmd in block["commands"]:
-                cmd = cmd.strip()
-                # Handle cd
-                if cmd.startswith("cd "):
-                    new_dir = cmd[3:].strip()
-                    if new_dir.startswith("/"):
-                        cwd = Path(new_dir)
-                    else:
-                        cwd = project_dir / new_dir
-                # Handle export
-                elif cmd.startswith("export "):
-                    var_part = cmd[7:].strip()
-                    if "=" in var_part:
-                        var_name, var_value = var_part.split("=", 1)
-                        var_value = var_value.strip('"').strip("'")
-                        var_value = os.path.expandvars(var_value)
-                        os.environ[var_name] = var_value
+            extract_setup_from_block(block)
+            found_prereqs = True
             break
-    return cwd
+
+    # If no Prerequisites, check step 1 for cd/export commands
+    if not found_prereqs and blocks:
+        extract_setup_from_block(blocks[0])
+
+    # Check for venv in the working directory
+    venv_path = cwd / ".venv"
+    if venv_path.exists():
+        venv_python = str(venv_path / "bin" / "python3")
+
+    return cwd, venv_python
 
 
-def run_milestone_step(project_dir: Path, step: dict, step_num: int, initial_cwd: Path = None) -> bool:
+def run_milestone_step(project_dir: Path, step: dict, step_num: int, initial_cwd: Path = None, venv_python: str = None) -> bool:
     """Run a single milestone verification step.
 
     Shows description, copyable code, then executes it.
     Returns True if step passed.
+
+    Args:
+        project_dir: Root project directory
+        step: Step dict with 'title' and 'commands'
+        step_num: Step number for display
+        initial_cwd: Working directory from Prerequisites (if any)
+        venv_python: Path to venv python3 from Prerequisites (if any)
     """
     title = step["title"]
     commands = step["commands"]
@@ -896,20 +930,27 @@ def run_milestone_step(project_dir: Path, step: dict, step_num: int, initial_cwd
     # Track cwd for cd commands - start from prereqs cwd if provided
     cwd = initial_cwd or project_dir
     all_passed = True
-    venv_python = None  # Track if we should use venv python
+    # venv_python is now passed in from apply_prereqs, but can still be set by source command in this step
 
     for cmd in commands:
         # Handle cd commands
         if cmd.strip().startswith("cd "):
             new_dir = cmd.strip()[3:].strip()
             if new_dir == "../..":
-                cwd = cwd.parent.parent
+                target = cwd.parent.parent
             elif new_dir == "..":
-                cwd = cwd.parent
+                target = cwd.parent
             elif new_dir.startswith("/"):
-                cwd = Path(new_dir)
+                target = Path(new_dir)
             else:
-                cwd = cwd / new_dir
+                target = cwd / new_dir
+
+            # Skip cd if target doesn't exist but we're already in a matching directory
+            if not target.exists() and cwd.name == new_dir.rstrip("/").split("/")[-1]:
+                print(f"  {C.DIM}$ cd {new_dir} (already there){C.NC}")
+                continue
+
+            cwd = target
             print(f"  {C.DIM}$ cd {new_dir}{C.NC}")
             continue
 
@@ -956,34 +997,45 @@ def run_milestone_step(project_dir: Path, step: dict, step_num: int, initial_cwd
         else:
             print(f"  {C.DIM}${C.NC} {C.SKY}{cmd[:70]}{C.NC}")
 
-        # Run the command (use actual_cmd which may have venv python substituted)
+        # Run the command with real-time output streaming
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 actual_cmd,
                 shell=True,
                 cwd=cwd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
                 text=True,
-                timeout=300,
                 env=os.environ.copy(),
             )
 
-            if result.returncode == 0:
+            # Stream output in real-time with indentation
+            output_lines = []
+            print(f"  {C.DIM}─────────────────────────────────────────{C.NC}")
+            for line in process.stdout:
+                line = line.rstrip()
+                output_lines.append(line)
+                # Color output based on content
+                if "error" in line.lower() or "fail" in line.lower():
+                    print(f"  {C.CORAL}  {line}{C.NC}")
+                elif "success" in line.lower() or "pass" in line.lower() or line.startswith("✓"):
+                    print(f"  {C.MINT}  {line}{C.NC}")
+                elif line.startswith("[") and "]" in line:  # Log lines
+                    print(f"  {C.DIM}  {line}{C.NC}")
+                else:
+                    print(f"    {line}")
+
+            process.wait(timeout=300)
+            print(f"  {C.DIM}─────────────────────────────────────────{C.NC}")
+
+            if process.returncode == 0:
                 print(f"  {C.MINT}✓ Success{C.NC}")
-                # Show some output if available
-                if result.stdout.strip():
-                    for line in result.stdout.strip().split("\n")[:10]:
-                        print(f"    {C.DIM}{line[:80]}{C.NC}")
-                    if result.stdout.count("\n") > 10:
-                        print(f"    {C.DIM}... ({result.stdout.count(chr(10)) - 10} more lines){C.NC}")
             else:
-                print(f"  {C.CORAL}✗ Failed (exit {result.returncode}){C.NC}")
-                if result.stderr.strip():
-                    for line in result.stderr.strip().split("\n")[:5]:
-                        print(f"    {C.CORAL}{line[:80]}{C.NC}")
+                print(f"  {C.CORAL}✗ Failed (exit {process.returncode}){C.NC}")
                 all_passed = False
 
         except subprocess.TimeoutExpired:
+            process.kill()
             print(f"  {C.CORAL}✗ Timeout (5 min){C.NC}")
             all_passed = False
         except Exception as e:
@@ -1040,12 +1092,15 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
                     print()
                     return
                 step = blocks[step_idx]
-                # Apply Prerequisites (cd, exports, etc.)
-                initial_cwd = apply_prereqs(project_dir, blocks)
+                # Apply Prerequisites (cd, exports, venv)
+                initial_cwd, venv_python = apply_prereqs(project_dir, blocks)
                 if initial_cwd != project_dir:
                     print(f"  {C.DIM}Working directory: {initial_cwd}{C.NC}")
+                if venv_python:
+                    print(f"  {C.DIM}Python: {venv_python}{C.NC}")
+                if initial_cwd != project_dir or venv_python:
                     print()
-                run_milestone_step(project_dir, step, int(step_num), initial_cwd)
+                run_milestone_step(project_dir, step, int(step_num), initial_cwd, venv_python)
                 return
             except ValueError:
                 print(f"  {C.CORAL}Invalid step number: {step_num}{C.NC}")
