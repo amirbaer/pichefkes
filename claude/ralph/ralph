@@ -294,13 +294,14 @@ def extract_code_blocks(description: str) -> list:
     blocks = []
 
     # Find code blocks with their preceding section titles
-    # Look for ## Title followed by ```lang ... ```
-    pattern = r'## ([^\n]+)\n```(\w*)\n(.*?)```'
+    # Look for ## Title, optional explanation text, then ```lang ... ```
+    pattern = r'## ([^\n]+)\n([^`]*?)```(\w*)\n(.*?)```'
 
     for match in re.finditer(pattern, description, re.DOTALL):
         title = match.group(1).strip()
-        lang = match.group(2) or "bash"
-        code = match.group(3).strip()
+        explanation = match.group(2).strip()  # Optional text between title and code
+        lang = match.group(3) or "bash"
+        code = match.group(4).strip()
 
         if lang in ("bash", "sh", "shell", ""):
             # Parse commands, handling multi-line strings
@@ -1157,6 +1158,7 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
 
         # Description (fallback if no steps found)
         desc = milestone.get("description", "")
+        has_verification_commands = "```" in desc  # Track if description has code blocks
         if desc:
             print(f"  {C.BOLD}{C.LAVENDER}Description:{C.NC}")
             print()
@@ -1221,26 +1223,27 @@ def cmd_milestone(args, project_dir: Path, prd_file: Path, prd: dict, milestone_
             print(f"  {C.DIM}{'─' * 55}{C.NC}")
             print()
 
-        # Manual verification commands
-        print(f"  {C.BOLD}{C.LAVENDER}Manual Verification Commands:{C.NC}")
-        print()
-        print(f"  {C.DIM}View this milestone in PRD:{C.NC}")
-        print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | jq '.stories[] | select(.id==\"{milestone_id}\")'{C.NC}")
-        print()
-        print(f"  {C.DIM}View progress log:{C.NC}")
-        run_dir = get_run_dir(prd_file)
-        if run_dir:
-            progress_file = run_dir / "progress.txt"
-            print(f"    {C.SAGE}cat {progress_file.relative_to(project_dir)}{C.NC}")
-        else:
-            print(f"    {C.SAGE}cat .ralph/progress.txt{C.NC}")
-        print()
-        print(f"  {C.DIM}View git log for recent changes:{C.NC}")
-        print(f"    {C.SAGE}git log --oneline -20{C.NC}")
-        print()
-        print(f"  {C.DIM}Check file changes:{C.NC}")
-        print(f"    {C.SAGE}git diff HEAD~5 --stat{C.NC}")
-        print()
+        # Only show generic commands if description lacks specific verification
+        if not has_verification_commands:
+            print(f"  {C.BOLD}{C.LAVENDER}Manual Verification Commands:{C.NC}")
+            print()
+            print(f"  {C.DIM}View this milestone in PRD:{C.NC}")
+            print(f"    {C.SAGE}cat {prd_file.relative_to(project_dir)} | jq '.stories[] | select(.id==\"{milestone_id}\")'{C.NC}")
+            print()
+            print(f"  {C.DIM}View progress log:{C.NC}")
+            run_dir = get_run_dir(prd_file)
+            if run_dir:
+                progress_file = run_dir / "progress.txt"
+                print(f"    {C.SAGE}cat {progress_file.relative_to(project_dir)}{C.NC}")
+            else:
+                print(f"    {C.SAGE}cat .ralph/progress.txt{C.NC}")
+            print()
+            print(f"  {C.DIM}View git log for recent changes:{C.NC}")
+            print(f"    {C.SAGE}git log --oneline -20{C.NC}")
+            print()
+            print(f"  {C.DIM}Check file changes:{C.NC}")
+            print(f"    {C.SAGE}git diff HEAD~5 --stat{C.NC}")
+            print()
 
         if status == "completed" and not verified:
             print(f"  {C.BOLD}{C.YELLOW}To mark as verified:{C.NC}")
@@ -1337,6 +1340,109 @@ def cmd_runs(args, project_dir: Path):
     print(
         f"  {C.DIM}View details:{C.NC} {C.SAGE}ralph show <index|name>{C.NC}"
     )
+    print()
+
+
+def cmd_show(args, project_dir: Path):
+    """Show details of a specific run."""
+    run_ref = args.subarg
+    if not run_ref:
+        print(f"  {C.CORAL}Error: Please specify a run{C.NC}")
+        print(f"  {C.DIM}Usage: ralph show <index|name>{C.NC}")
+        print(f"  {C.DIM}Example: ralph show 1{C.NC}")
+        print(f"  {C.DIM}Example: ralph show run-002-feature{C.NC}")
+        print()
+        return
+
+    runs_dir = project_dir / ".ralph" / "runs"
+    if not runs_dir.exists():
+        print(f"  {C.DIM}No runs found{C.NC}")
+        print()
+        return
+
+    run_dirs = sorted(
+        [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run-")],
+        key=lambda d: d.name,
+    )
+
+    # Find the run by index or name
+    run_dir = None
+    try:
+        idx = int(run_ref) - 1  # 1-indexed for user
+        if 0 <= idx < len(run_dirs):
+            run_dir = run_dirs[idx]
+    except ValueError:
+        # Try matching by name
+        for d in run_dirs:
+            if d.name == run_ref or run_ref in d.name:
+                run_dir = d
+                break
+
+    if not run_dir:
+        print(f"  {C.CORAL}Run not found: {run_ref}{C.NC}")
+        print()
+        print(f"  {C.DIM}Available runs:{C.NC}")
+        for i, d in enumerate(run_dirs, 1):
+            print(f"    {i}. {d.name}")
+        print()
+        return
+
+    prd_file = run_dir / "prd.json"
+    if not prd_file.exists():
+        print(f"  {C.CORAL}No PRD found in {run_dir.name}{C.NC}")
+        print()
+        return
+
+    prd = load_prd(prd_file)
+    counts = count_tasks_by_status(prd)
+
+    # Header
+    print(f"  {C.BOLD}{C.LAVENDER}Run:{C.NC} {C.SAGE}{run_dir.name}{C.NC}")
+    print()
+    print(f"  {C.DIM}Title{C.NC}         {C.SAGE}{get_prd_title(prd)}{C.NC}")
+    print(f"  {C.DIM}Status{C.NC}        {C.SAGE}{prd.get('status', 'unknown')}{C.NC}")
+    print(f"  {C.DIM}Created{C.NC}       {C.SAGE}{prd.get('created', 'unknown')}{C.NC}")
+    print(f"  {C.DIM}Progress{C.NC}      {C.SAGE}{counts['completed']}{C.NC}{C.DIM}/{C.NC}{C.SAGE}{counts['total']}{C.NC} {C.DIM}tasks{C.NC}")
+    print()
+
+    # Tasks
+    stories = prd.get("stories", [])
+    if stories:
+        print(f"  {C.BOLD}{C.LAVENDER}Tasks:{C.NC}")
+        print()
+
+        # Group by category
+        by_category = {}
+        for story in stories:
+            cat = story.get("category", "general")
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(story)
+
+        for cat, tasks in by_category.items():
+            if len(by_category) > 1:
+                print(f"  {C.YELLOW}{cat}{C.NC}")
+            for task in tasks:
+                status = task.get("status", "open")
+                if status == "completed":
+                    icon = f"{C.MINT}✓{C.NC}"
+                else:
+                    icon = f"{C.DIM}○{C.NC}"
+                is_ms = is_milestone_task(task)
+                ms_marker = f" {C.PINK}[M]{C.NC}" if is_ms else ""
+                print(f"    {icon} {C.PINK}{task['id']}{C.NC}: {task['title']}{ms_marker}")
+            print()
+
+    # Progress file
+    progress_file = run_dir / "progress.txt"
+    if progress_file.exists():
+        print(f"  {C.DIM}Progress log:{C.NC} {C.SAGE}{progress_file.relative_to(project_dir)}{C.NC}")
+
+    # Actions
+    if prd.get("status") == "paused":
+        print()
+        print(f"  {C.DIM}To resume this run:{C.NC}")
+        print(f"    {C.SAGE}# Edit PRD status to 'active'{C.NC}")
     print()
 
 
@@ -1661,6 +1767,559 @@ Start by reading the PRD, progress, and notes files, then work on the next avail
 
 
 # ═══════════════════════════════════════════════════════════════════
+# RUN MANAGEMENT COMMANDS - Create/manage PRD runs
+# ═══════════════════════════════════════════════════════════════════
+
+
+def get_next_run_number(project_dir: Path) -> int:
+    """Get the next available run number."""
+    runs_dir = project_dir / ".ralph" / "runs"
+    if not runs_dir.exists():
+        return 1
+
+    max_num = 0
+    for d in runs_dir.iterdir():
+        if d.is_dir() and d.name.startswith("run-"):
+            try:
+                num = int(d.name.split("-")[1])
+                max_num = max(max_num, num)
+            except (ValueError, IndexError):
+                pass
+    return max_num + 1
+
+
+def get_next_task_id(prd: dict) -> str:
+    """Get the next available task ID (e.g., '013' if last was '012')."""
+    max_num = 0
+    for story in prd.get("stories", []):
+        task_id = story.get("id", "")
+        # Skip milestone IDs (start with M)
+        if task_id.startswith("M"):
+            continue
+        try:
+            num = int(task_id)
+            max_num = max(max_num, num)
+        except ValueError:
+            pass
+    return f"{max_num + 1:03d}"
+
+
+def slugify(text: str) -> str:
+    """Convert text to a slug for directory names."""
+    import re
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\s-]', '', text)
+    text = re.sub(r'[\s_]+', '-', text)
+    text = re.sub(r'-+', '-', text)
+    return text.strip('-')[:40]
+
+
+def cmd_new(args, project_dir: Path):
+    """Create a new run with empty PRD."""
+    title = args.subarg
+    if not title:
+        print(f"  {C.CORAL}Error: Please provide a title{C.NC}")
+        print(f"  {C.DIM}Usage: ralph new \"Run Title\"{C.NC}")
+        print()
+        return
+
+    run_num = get_next_run_number(project_dir)
+    slug = slugify(title)
+    run_name = f"run-{run_num:03d}-{slug}"
+    run_dir = project_dir / ".ralph" / "runs" / run_name
+
+    # Create directory
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create PRD
+    new_prd = {
+        "id": f"{run_num:03d}",
+        "title": title,
+        "created": datetime.now().strftime("%Y-%m-%d"),
+        "status": "active",
+        "description": "",
+        "stories": []
+    }
+
+    prd_path = run_dir / "prd.json"
+    save_prd(prd_path, new_prd)
+
+    # Create empty progress file
+    (run_dir / "progress.txt").write_text(f"# Progress Log: {title}\n\n")
+
+    # Mark any other active PRDs as paused
+    runs_dir = project_dir / ".ralph" / "runs"
+    for d in runs_dir.iterdir():
+        if d.is_dir() and d != run_dir:
+            other_prd_file = d / "prd.json"
+            if other_prd_file.exists():
+                try:
+                    other_prd = load_prd(other_prd_file)
+                    if other_prd.get("status") == "active":
+                        other_prd["status"] = "paused"
+                        save_prd(other_prd_file, other_prd)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+    print(f"  {C.MINT}✓ Created new run:{C.NC} {C.SAGE}{run_name}{C.NC}")
+    print()
+    print(f"  {C.DIM}PRD:{C.NC} {C.SAGE}{prd_path.relative_to(project_dir)}{C.NC}")
+    print()
+    print(f"  {C.BOLD}{C.LAVENDER}Next steps:{C.NC}")
+    print(f"    {C.SAGE}ralph add \"Task title\"{C.NC}       {C.DIM}Add tasks{C.NC}")
+    print(f"    {C.SAGE}ralph milestone compile{C.NC}      {C.DIM}Add milestones{C.NC}")
+    print(f"    {C.SAGE}ralph run{C.NC}                    {C.DIM}Execute tasks{C.NC}")
+    print()
+
+
+def cmd_add(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Add a task to current PRD."""
+    title = args.subarg
+    if not title:
+        print(f"  {C.CORAL}Error: Please provide a task title{C.NC}")
+        print(f"  {C.DIM}Usage: ralph add \"Task title\"{C.NC}")
+        print()
+        return
+
+    # Get description from --desc or prompt
+    description = getattr(args, 'desc', '') or ""
+    category = getattr(args, 'category', '') or ""
+
+    task_id = get_next_task_id(prd)
+
+    new_task = {
+        "id": task_id,
+        "title": title,
+        "description": description,
+        "status": "open",
+        "dependencies": []
+    }
+
+    if category:
+        new_task["category"] = category
+
+    prd["stories"].append(new_task)
+    save_prd(prd_file, prd)
+
+    print(f"  {C.MINT}✓ Added task {task_id}:{C.NC} {C.SAGE}{title}{C.NC}")
+    if description:
+        print(f"    {C.DIM}{description[:60]}{'...' if len(description) > 60 else ''}{C.NC}")
+    if category:
+        print(f"    {C.DIM}Category: {category}{C.NC}")
+    print()
+
+    # Show current task count
+    counts = count_tasks_by_status(prd)
+    print(f"  {C.DIM}Total tasks:{C.NC} {C.SAGE}{counts['total']}{C.NC}")
+    print()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# COMPILE COMMAND - Add milestones and finalize PRD
+# ═══════════════════════════════════════════════════════════════════
+
+
+def analyze_tasks_for_milestones(project_dir: Path, prd_title: str, tasks: list) -> list[dict] | None:
+    """Use Claude to analyze tasks and suggest logical milestone groupings.
+
+    Returns a list of milestone suggestions, each with:
+    - title: milestone title
+    - description: what this milestone verifies
+    - task_ids: list of task IDs in this group
+    """
+    tasks_json = json.dumps([{"id": t["id"], "title": t["title"], "description": t.get("description", "")} for t in tasks], indent=2)
+
+    prompt = f"""Analyze these development tasks and suggest logical milestone groupings.
+
+Project: {prd_title}
+Project directory: {project_dir}
+
+Tasks:
+{tasks_json}
+
+Group related tasks together into milestones. Consider:
+- Tasks that form a logical unit of work
+- Dependencies between tasks
+- Natural verification points
+
+Return a JSON array of milestone objects:
+[
+  {{
+    "title": "Milestone: <meaningful title>",
+    "description": "Brief description of what this milestone verifies",
+    "task_ids": ["001", "002", "003"]
+  }},
+  ...
+]
+
+Guidelines:
+- Create 1-4 milestones depending on task count and logical groupings
+- Each milestone should group 2-5 related tasks
+- Every task must be assigned to exactly one milestone
+- Order milestones by when they should be verified (based on task dependencies)
+- If tasks should be reordered for better flow, include "reorder": true and list task_ids in the suggested execution order
+
+Return ONLY the JSON array, no other text.
+"""
+
+    try:
+        result = subprocess.run(
+            ["claude", "--print", "-p", prompt],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            cwd=project_dir,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        response = result.stdout.strip()
+
+        # Try to extract JSON array from response
+        import re
+        json_match = re.search(r'\[[\s\S]*\]', response)
+        if json_match:
+            milestones = json.loads(json_match.group())
+            if isinstance(milestones, list) and len(milestones) > 0:
+                return milestones
+
+        return None
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
+
+
+def generate_milestone_with_claude(project_dir: Path, prd_title: str, tasks: list, milestone_num: int, category: str | None = None) -> dict | None:
+    """Use Claude to generate a milestone with verification steps."""
+    tasks_json = json.dumps(tasks, indent=2)
+
+    prompt = f"""Generate a milestone for a development PRD with CONTENT-SPECIFIC verification steps.
+
+Project directory: {project_dir}
+PRD Title: {prd_title}
+{f'Category: {category}' if category else ''}
+
+Tasks to verify:
+{tasks_json}
+
+Generate a milestone JSON object with:
+1. A concise, meaningful title (not just "Review X tasks")
+2. A description with SPECIFIC verification steps that actually check the work was done correctly
+
+IMPORTANT: Verification must check CONTENT, not just existence. For each task type:
+
+For CODE tasks:
+- Run the actual code to verify it works
+- Run specific tests that exercise the new functionality
+- Check edge cases mentioned in the task
+
+For RESEARCH/DOCUMENTATION tasks:
+- List specific files that should exist
+- Use grep/cat to verify the content addresses the specific questions asked
+- Check that key topics/terms are covered
+
+For CONFIGURATION tasks:
+- Run commands that exercise the new configuration
+- Verify settings are correct
+
+Format each verification step as:
+## Step Title
+Brief explanation of what we're checking
+```bash
+actual command that verifies the content
+```
+
+Example for a research task:
+{{
+  "title": "Milestone: Research Foundations Complete",
+  "description": "Verify research covers required topics.\\n\\n## Check Research Folder Exists\\n```bash\\nls -la docs/research/\\n```\\n\\n## Verify Ogden's Basic English Coverage\\nCheck that the research addresses Ogden's 850 word list and its goals\\n```bash\\ngrep -l 'Ogden\\|Basic English\\|850' docs/research/*.md\\n```\\n\\n## Verify Problems Identified\\nConfirm the research documents what problems these approaches tried to solve\\n```bash\\ngrep -A5 'problem' docs/research/*.md | head -30\\n```"
+}}
+
+Return ONLY the JSON object, no other text.
+"""
+
+    try:
+        result = subprocess.run(
+            ["claude", "--print", "-p", prompt],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=project_dir,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        # Parse the JSON from Claude's response
+        response = result.stdout.strip()
+
+        # Try to extract JSON from response
+        import re
+        json_match = re.search(r'\{[^{}]*"title"[^{}]*"description"[^{}]*\}', response, re.DOTALL)
+        if json_match:
+            milestone_data = json.loads(json_match.group())
+            return milestone_data
+
+        # Try parsing the whole response as JSON
+        milestone_data = json.loads(response)
+        return milestone_data
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
+
+
+def cmd_compile(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Add milestones to PRD using Claude to generate verification steps."""
+    stories = prd.get("stories", [])
+
+    if not stories:
+        print(f"  {C.CORAL}Error: No tasks in PRD{C.NC}")
+        print(f"  {C.DIM}Add tasks with: ralph add \"Task title\"{C.NC}")
+        print()
+        return
+
+    # Check if already has milestones
+    existing_milestones = [s for s in stories if is_milestone_task(s)]
+    if existing_milestones:
+        print(f"  {C.YELLOW}PRD already has {len(existing_milestones)} milestone(s):{C.NC}")
+        print()
+        for ms in existing_milestones:
+            print(f"    {C.PINK}{ms['id']}{C.NC}: {ms['title']}")
+        print()
+
+        if not getattr(args, 'force', False):
+            try:
+                reply = input(f"  {C.YELLOW}Re-compile and regenerate milestones? [y/N]{C.NC} ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                print(f"  {C.PEACH}Cancelled.{C.NC}")
+                print()
+                return
+
+            if reply not in ("y", "yes"):
+                print()
+                print(f"  {C.DIM}Keeping existing milestones.{C.NC}")
+                print()
+                return
+
+        # Remove existing milestones
+        prd["stories"] = [s for s in stories if not is_milestone_task(s)]
+        stories = prd["stories"]
+        print(f"  {C.DIM}Removed {len(existing_milestones)} existing milestone(s){C.NC}")
+        print()
+
+    prd_title = get_prd_title(prd)
+
+    print(f"  {C.BOLD}{C.LAVENDER}Compiling PRD:{C.NC} {C.SAGE}{prd_title}{C.NC}")
+    print()
+    print(f"  {C.DIM}Tasks:{C.NC} {len(stories)}")
+    print()
+
+    # Build task lookup
+    task_by_id = {s["id"]: s for s in stories}
+
+    # Ask Claude to analyze tasks and suggest groupings
+    print(f"  {C.DIM}Analyzing tasks with Claude...{C.NC}")
+    print()
+
+    analysis = analyze_tasks_for_milestones(project_dir, prd_title, stories)
+
+    if not analysis:
+        print(f"  {C.CORAL}Failed to analyze tasks with Claude{C.NC}")
+        print(f"  {C.DIM}Try again or add milestones manually{C.NC}")
+        print()
+        return
+
+    # Show suggested groupings
+    print(f"  {C.BOLD}{C.LAVENDER}Suggested milestone groupings:{C.NC}")
+    print()
+
+    # Check if any reordering is suggested
+    suggested_order = []
+    for group in analysis:
+        suggested_order.extend(group.get("task_ids", []))
+
+    current_order = [s["id"] for s in stories]
+    reorder_needed = suggested_order != current_order and set(suggested_order) == set(current_order)
+
+    for i, group in enumerate(analysis, 1):
+        title = group.get("title", f"Milestone {i}")
+        desc = group.get("description", "")
+        task_ids = group.get("task_ids", [])
+
+        print(f"    {C.PINK}M{i:02d}{C.NC}: {title}")
+        if desc:
+            print(f"        {C.DIM}{desc[:60]}{'...' if len(desc) > 60 else ''}{C.NC}")
+        print(f"        {C.DIM}Tasks:{C.NC} {', '.join(task_ids)}")
+        for tid in task_ids:
+            task = task_by_id.get(tid)
+            if task:
+                print(f"          {C.SAGE}{tid}{C.NC}: {task['title']}")
+        print()
+
+    if reorder_needed:
+        print(f"  {C.YELLOW}Claude suggests reordering tasks:{C.NC}")
+        print(f"    {C.DIM}Current:{C.NC}  {' → '.join(current_order)}")
+        print(f"    {C.DIM}Suggested:{C.NC} {' → '.join(suggested_order)}")
+        print()
+
+    # Confirm with user
+    if not getattr(args, 'force', False):
+        prompt_text = "Apply these milestones"
+        if reorder_needed:
+            prompt_text += " and reorder tasks"
+        try:
+            reply = input(f"  {C.YELLOW}{prompt_text}? [y/N]{C.NC} ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+        if reply not in ("y", "yes"):
+            print()
+            print(f"  {C.DIM}Cancelled.{C.NC}")
+            print()
+            return
+
+    # Reorder tasks if suggested
+    if reorder_needed:
+        reordered_stories = []
+        for tid in suggested_order:
+            if tid in task_by_id:
+                reordered_stories.append(task_by_id[tid])
+        prd["stories"] = reordered_stories
+        stories = reordered_stories
+        print()
+        print(f"  {C.MINT}✓ Reordered tasks{C.NC}")
+
+    # Generate detailed milestones
+    print()
+    print(f"  {C.DIM}Generating milestone details...{C.NC}")
+    print()
+
+    milestones_to_add = []
+    for i, group in enumerate(analysis, 1):
+        task_ids = group.get("task_ids", [])
+        group_tasks = [task_by_id[tid] for tid in task_ids if tid in task_by_id]
+
+        if not group_tasks:
+            continue
+
+        print(f"    {C.DIM}Generating M{i:02d}...{C.NC}", end=" ", flush=True)
+
+        # Try to generate detailed milestone with Claude
+        claude_milestone = generate_milestone_with_claude(
+            project_dir, prd_title, group_tasks, i, group.get("title")
+        )
+
+        if claude_milestone:
+            milestone = {
+                "id": f"M{i:02d}",
+                "title": claude_milestone.get("title", group.get("title", f"Milestone {i}")),
+                "description": claude_milestone.get("description", group.get("description", "")),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            print(f"{C.MINT}✓{C.NC}")
+        else:
+            # Use the analysis suggestion as fallback
+            milestone = {
+                "id": f"M{i:02d}",
+                "title": group.get("title", f"Milestone: Review tasks {task_ids[0]}-{task_ids[-1]}"),
+                "description": group.get("description", "") + "\n\nTasks:\n" +
+                              "\n".join(f"- {t['id']}: {t['title']}" for t in group_tasks),
+                "status": "open",
+                "category": "milestone",
+                "dependencies": task_ids
+            }
+            print(f"{C.YELLOW}(using analysis){C.NC}")
+
+        last_task_id = task_ids[-1] if task_ids else None
+        milestones_to_add.append((milestone, last_task_id))
+
+    print()
+
+    # Insert milestones into the stories list
+    for milestone, after_task_id in milestones_to_add:
+        # Find position after the specified task
+        insert_idx = len(prd["stories"])
+        for i, story in enumerate(prd["stories"]):
+            if story["id"] == after_task_id:
+                insert_idx = i + 1
+                break
+        prd["stories"].insert(insert_idx, milestone)
+
+    # Save the PRD
+    save_prd(prd_file, prd)
+
+    print(f"  {C.MINT}✓ Added {len(milestones_to_add)} milestone(s):{C.NC}")
+    print()
+    for milestone, _ in milestones_to_add:
+        deps_str = ", ".join(milestone["dependencies"][:3])
+        if len(milestone["dependencies"]) > 3:
+            deps_str += f"... +{len(milestone['dependencies']) - 3} more"
+        print(f"    {C.PINK}{milestone['id']}{C.NC}: {milestone['title']}")
+        print(f"        {C.DIM}depends on: {deps_str}{C.NC}")
+    print()
+
+    # Show summary
+    counts = count_tasks_by_status(prd)
+    print(f"  {C.BOLD}{C.LAVENDER}PRD Summary:{C.NC}")
+    print(f"    {C.DIM}Total tasks:{C.NC} {counts['total']}")
+    print(f"    {C.DIM}Milestones:{C.NC} {len(milestones_to_add)}")
+    print()
+    print(f"  {C.MINT}Ready to run:{C.NC} {C.SAGE}ralph run{C.NC}")
+    print()
+
+
+def cmd_clear(args, project_dir: Path, prd_file: Path, prd: dict):
+    """Remove all milestones from the current PRD."""
+    stories = prd.get("stories", [])
+
+    # Find existing milestones
+    milestones = [s for s in stories if is_milestone_task(s)]
+
+    if not milestones:
+        print(f"  {C.DIM}No milestones to clear{C.NC}")
+        print()
+        return
+
+    print(f"  {C.BOLD}{C.LAVENDER}Milestones to remove:{C.NC}")
+    print()
+    for ms in milestones:
+        status_icon = "✓" if ms.get("status") == "completed" else "○"
+        print(f"    {C.PINK}{ms['id']}{C.NC}: {ms['title']} {C.DIM}[{status_icon}]{C.NC}")
+    print()
+
+    # Confirm unless --force
+    if not getattr(args, 'force', False):
+        try:
+            reply = input(f"  {C.YELLOW}Remove {len(milestones)} milestone(s)? [y/N]{C.NC} ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            print(f"  {C.PEACH}Cancelled.{C.NC}")
+            print()
+            return
+
+        if reply not in ("y", "yes"):
+            print()
+            print(f"  {C.DIM}Keeping milestones.{C.NC}")
+            print()
+            return
+
+    # Remove milestones
+    prd["stories"] = [s for s in stories if not is_milestone_task(s)]
+    save_prd(prd_file, prd)
+
+    print()
+    print(f"  {C.MINT}✓ Removed {len(milestones)} milestone(s){C.NC}")
+    print()
+
+
+# ═══════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1692,17 +2351,24 @@ def print_usage():
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Commands:{C.NC}")
     print(
-        f"    {C.MINT}run{C.NC}             {C.DIM}Run the iteration loop (execute PRD tasks){C.NC}"
+        f"    {C.MINT}new{C.NC}             {C.DIM}Create a new run{C.NC}"
     )
     print(
-        f"    {C.MINT}info{C.NC}            {C.DIM}Show current cycle status and PRD details{C.NC}"
+        f"    {C.MINT}add{C.NC}             {C.DIM}Add a task to current run{C.NC}"
+    )
+    print(
+        f"    {C.MINT}run{C.NC}             {C.DIM}Execute PRD tasks{C.NC}"
+    )
+    print(
+        f"    {C.MINT}info{C.NC}            {C.DIM}Show current status{C.NC}"
     )
     print(f"    {C.MINT}runs{C.NC}            {C.DIM}List all runs{C.NC}")
+    print(f"    {C.MINT}show{C.NC}            {C.DIM}Show details of a run{C.NC}")
     print(
-        f"    {C.MINT}milestone{C.NC}       {C.DIM}List milestones, show steps, or run a step{C.NC}"
+        f"    {C.MINT}milestone{C.NC}       {C.DIM}Manage milestones (compile, clear, <id>){C.NC}"
     )
     print(
-        f"    {C.MINT}install{C.NC}         {C.DIM}Install ralph in current directory{C.NC}"
+        f"    {C.MINT}install{C.NC}         {C.DIM}Install ralph in a project{C.NC}"
     )
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Options:{C.NC}")
@@ -1721,28 +2387,26 @@ def print_usage():
     print(f"    {C.MINT}-h, --help{C.NC}      {C.DIM}Show this help{C.NC}")
     print()
     print(f"  {C.BOLD}{C.LAVENDER}Examples:{C.NC}")
-    print(f"    {C.SAGE}ralph{C.NC}              {C.DIM}Show this help{C.NC}")
-    print(
-        f"    {C.SAGE}ralph run{C.NC}          {C.DIM}Run the iteration loop{C.NC}"
-    )
-    print(
-        f"    {C.SAGE}ralph run -y{C.NC}       {C.DIM}Run without confirmation{C.NC}"
-    )
-    print(
-        f"    {C.SAGE}ralph run -n 10{C.NC}    {C.DIM}Run up to 10 iterations{C.NC}"
-    )
-    print(
-        f"    {C.SAGE}ralph info{C.NC}         {C.DIM}Show current status{C.NC}"
-    )
-    print(f"    {C.SAGE}ralph runs{C.NC}         {C.DIM}List all runs{C.NC}")
-    print(f"    {C.SAGE}ralph milestone{C.NC}    {C.DIM}List all milestones{C.NC}")
-    print(f"    {C.SAGE}ralph milestone M1{C.NC} {C.DIM}Show verification steps for M1{C.NC}")
-    print(f"    {C.SAGE}ralph milestone M1 1{C.NC}  {C.DIM}Run step 1 of milestone M1{C.NC}")
-    print(
-        f"    {C.SAGE}ralph milestone M1 --skip{C.NC}  {C.DIM}Skip milestone M1{C.NC}"
-    )
-    print(f"    {C.SAGE}ralph run -s{C.NC}       {C.DIM}Run without milestone pauses{C.NC}")
-    print(f"    {C.SAGE}ralph install{C.NC}      {C.DIM}Install ralph in current dir{C.NC}")
+    print(f"    {C.SAGE}ralph{C.NC}                    {C.DIM}Show this help{C.NC}")
+    print()
+    print(f"  {C.DIM}Creating runs:{C.NC}")
+    print(f"    {C.SAGE}ralph new \"Feature X\"{C.NC}    {C.DIM}Create a new run{C.NC}")
+    print(f"    {C.SAGE}ralph add \"Task title\"{C.NC}   {C.DIM}Add task to current run{C.NC}")
+    print()
+    print(f"  {C.DIM}Milestones:{C.NC}")
+    print(f"    {C.SAGE}ralph milestone compile{C.NC}  {C.DIM}Add milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone clear{C.NC}    {C.DIM}Remove milestones{C.NC}")
+    print(f"    {C.SAGE}ralph milestone{C.NC}          {C.DIM}List milestones{C.NC}")
+    print()
+    print(f"  {C.DIM}Executing:{C.NC}")
+    print(f"    {C.SAGE}ralph run{C.NC}                {C.DIM}Execute tasks{C.NC}")
+    print(f"    {C.SAGE}ralph run -y{C.NC}             {C.DIM}Skip confirmation{C.NC}")
+    print(f"    {C.SAGE}ralph run -n 10{C.NC}          {C.DIM}Max 10 iterations{C.NC}")
+    print()
+    print(f"  {C.DIM}Status:{C.NC}")
+    print(f"    {C.SAGE}ralph info{C.NC}               {C.DIM}Show current status{C.NC}")
+    print(f"    {C.SAGE}ralph runs{C.NC}               {C.DIM}List all runs{C.NC}")
+    print(f"    {C.SAGE}ralph show 1{C.NC}             {C.DIM}Show run details{C.NC}")
     print()
 
 
@@ -1757,13 +2421,19 @@ def main():
     )
 
     parser.add_argument("command", nargs="?", default=None)
-    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>
+    parser.add_argument("subarg", nargs="?", default=None)  # For milestone <id>, show <run>
     parser.add_argument("subarg2", nargs="?", default=None)  # For milestone <id> <step>
     parser.add_argument("-y", "--yes", action="store_true")
     parser.add_argument("-s", "--skip-milestones", action="store_true", dest="skip_milestones")
     parser.add_argument("--skip", action="store_true")  # For milestone <id> --skip
     parser.add_argument("-n", "--max", type=int, default=20, dest="max_iterations")
     parser.add_argument("-h", "--help", action="store_true")
+    parser.add_argument("--desc", type=str, default="")  # For add --desc
+    parser.add_argument("--category", "-c", type=str, default="")  # For add --category
+    parser.add_argument("--force", "-f", action="store_true")  # For compile --force
+    parser.add_argument("--interval", "-i", type=int, default=5)  # For compile --interval
+    parser.add_argument("--by-category", action="store_true", dest="by_category", default=True)
+    parser.add_argument("--no-category", action="store_false", dest="by_category")
 
     args = parser.parse_args()
 
@@ -1786,6 +2456,18 @@ def main():
         cmd_install(args, target_dir)
     elif command == "runs":
         cmd_runs(args, project_dir)
+    elif command == "show":
+        cmd_show(args, project_dir)
+    elif command == "new":
+        cmd_new(args, project_dir)
+    elif command == "add":
+        if not prd_file:
+            print(f"  {C.CORAL}Error: No active PRD found{C.NC}")
+            print(f"  {C.DIM}Create one with: ralph new \"Run Title\"{C.NC}")
+            print()
+            sys.exit(1)
+        prd = load_prd(prd_file)
+        cmd_add(args, project_dir, prd_file, prd)
     elif command in ("run", "info", "milestone"):
         if not prd_file:
             print(f"  {C.CORAL}Error: No PRD file found{C.NC}")
@@ -1796,7 +2478,14 @@ def main():
         if command == "run":
             cmd_run(args, project_dir, prd_file, prd)
         elif command == "milestone":
-            cmd_milestone(args, project_dir, prd_file, prd, args.subarg, args.subarg2)
+            # Handle milestone subcommands: compile, clear, or <id>
+            subarg = args.subarg
+            if subarg == "compile":
+                cmd_compile(args, project_dir, prd_file, prd)
+            elif subarg == "clear":
+                cmd_clear(args, project_dir, prd_file, prd)
+            else:
+                cmd_milestone(args, project_dir, prd_file, prd, subarg, args.subarg2)
         else:
             cmd_info(args, project_dir, prd_file, prd)
     else:
