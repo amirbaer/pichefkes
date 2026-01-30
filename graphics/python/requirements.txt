@@ -1,0 +1,7 @@
+Pillow
+shapely
+numpy
+matplotlib
+natsort
+imageio
+opencv-python
