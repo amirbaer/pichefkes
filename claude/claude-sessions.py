@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """List all Claude Code sessions across projects with copy-pasteable resume commands."""
 
+import argparse
+import json
 import os
 import re
 import sys
@@ -40,16 +42,72 @@ def decode_project_path(encoded):
     return resolved
 
 
-def main():
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 20
+def _parse_user_msg(obj):
+    """Extract cleaned text from a user message object."""
+    content = obj.get("message", {}).get("content", "")
+    if isinstance(content, list):
+        content = " ".join(
+            b.get("text", "") for b in content if b.get("type") == "text"
+        )
+    msg = content.strip().split("\n")[0].strip()
+    msg = re.sub(r"^[➜$#>]\s*", "", msg)
+    msg = re.sub(r"^\S+\s+git:\(.*?\)\s*[✗✓]*\s*", "", msg)
+    return msg
 
-    home = os.path.expanduser("~")
-    projects_dir = os.path.join(home, ".claude", "projects")
 
-    if not os.path.isdir(projects_dir):
-        print("No Claude sessions found.", file=sys.stderr)
-        sys.exit(1)
+def extract_session_meta(fpath, msg_index=None):
+    """Extract custom title and a user message from a session file.
 
+    msg_index: None = last message (default)
+               0 = first, 1 = second, ...  (from start)
+               -1 = last, -2 = second to last, ...  (from end)
+    """
+    all_msgs = []
+    custom_title = ""
+    try:
+        with open(fpath, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "custom-title":
+                    custom_title = obj.get("customTitle", "")
+                if obj.get("type") == "user":
+                    msg = _parse_user_msg(obj)
+                    if msg:
+                        all_msgs.append(msg)
+    except (OSError, UnicodeDecodeError):
+        pass
+
+    total = len(all_msgs)
+    user_msg = ""
+    shown_idx = 0
+    if all_msgs:
+        idx = msg_index if msg_index is not None else -1
+        try:
+            user_msg = all_msgs[idx]
+            shown_idx = idx if idx >= 0 else total + idx
+        except IndexError:
+            if idx < 0:
+                user_msg = all_msgs[-1]
+                shown_idx = total - 1
+            else:
+                user_msg = all_msgs[0]
+                shown_idx = 0
+
+    return {
+        "title": custom_title,
+        "prompt": user_msg[:80],
+        "total": total,
+        "shown": shown_idx + 1,  # 1-based for display
+    }
+
+
+def collect_sessions(projects_dir, msg_index):
+    """Collect and sort all sessions."""
     sessions = []
     for proj in os.listdir(projects_dir):
         proj_path = os.path.join(projects_dir, proj)
@@ -61,33 +119,145 @@ def main():
                 mtime = os.path.getmtime(fpath)
                 session_id = f.replace(".jsonl", "")
                 decoded = decode_project_path(proj)
-                sessions.append((mtime, decoded, session_id))
-
-    use_color = sys.stdout.isatty()
-
+                meta = extract_session_meta(fpath, msg_index=msg_index)
+                sessions.append((mtime, decoded, session_id, meta))
     sessions.sort(reverse=True)
+    return sessions
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="List Claude Code sessions",
+        epilog="Message selection: default=last, --first=first, +N=Nth from start, -N=Nth from end. "
+               "Use --get N to print the resume command for row N.",
+    )
+    parser.add_argument("n", nargs="?", type=int, default=None,
+                        help="row number to get command for, or max sessions to list")
+    parser.add_argument("--first", action="store_true", help="show first user message instead of last")
+    parser.add_argument("--msg", type=int, default=None, metavar="N",
+                        help="message index: +N from start (0-based), -N from end")
+    args, unknown = parser.parse_known_args()
+
+    # Support bare +N / -N without --msg
+    if args.msg is None and not args.first:
+        for arg in unknown:
+            if re.match(r"^[+-]\d+$", arg):
+                args.msg = int(arg)
+                break
+
+    if args.first:
+        msg_idx = 0
+    elif args.msg is not None:
+        msg_idx = args.msg
+    else:
+        msg_idx = None
+
+    home = os.path.expanduser("~")
+    projects_dir = os.path.join(home, ".claude", "projects")
+
+    if not os.path.isdir(projects_dir):
+        print("No Claude sessions found.", file=sys.stderr)
+        sys.exit(1)
+
+    sessions = collect_sessions(projects_dir, msg_idx)
+
+    # If n is given and falls within the displayed range, treat as row getter
+    # Otherwise treat as limit
+    get_row = None
+    limit = 20
+    if args.n is not None:
+        if args.n <= len(sessions) and args.n >= 1 and args.n <= 20:
+            # Ambiguous: could be limit or row. Use heuristic:
+            # if it would be a valid row in the default view, treat as row getter
+            get_row = args.n
+        elif args.n > 20:
+            limit = args.n
+        else:
+            get_row = args.n
+
+    if get_row is not None:
+        idx = get_row - 1
+        if idx < 0 or idx >= len(sessions):
+            print(f"Invalid row {get_row}. Have {len(sessions)} sessions.", file=sys.stderr)
+            sys.exit(1)
+        _, proj_dir, sid, _ = sessions[idx]
+        cmd = f'cd "{proj_dir}" && claude --resume {sid}'
+        if sys.stdout.isatty():
+            print(f"\033[38;5;242m{cmd}\033[0m")
+        else:
+            print(cmd)
+        sys.exit(0)
+
+    display = sessions[:limit]
+    use_color = sys.stdout.isatty()
     now = time.time()
-    for mtime, proj_dir, sid in sessions[:limit]:
+
+    # Build rows
+    rows = []
+    for i, (mtime, proj_dir, sid, meta) in enumerate(display, 1):
         ts = time.strftime("%b %d %H:%M", time.localtime(mtime))
+        # Shorten path: replace home with ~
+        short_dir = proj_dir.replace(home, "~", 1)
+        rows.append((i, mtime, ts, short_dir, meta))
+
+    # Compute column widths for alignment
+    max_idx_w = len(str(len(rows)))
+    max_dir_len = max((len(r[3]) for r in rows), default=0)
+    max_counter_len = max(
+        (len(f"[{r[4]['shown']}/{r[4]['total']}]") for r in rows if r[4]["total"] > 0),
+        default=0,
+    )
+
+    for row_idx, mtime, ts, short_dir, meta in rows:
         age_hours = (now - mtime) / 3600
+        title = meta["title"]
+        prompt = meta["prompt"]
+        total = meta["total"]
+        shown = meta["shown"]
+
+        summary = title or prompt or ""
+        dir_pad = max_dir_len - len(short_dir)
+
+        if total > 0:
+            counter = f"[{shown}/{total}]"
+        else:
+            counter = ""
+        counter_pad = max_counter_len - len(counter)
 
         if not use_color:
-            print(f'{ts}  cd "{proj_dir}" && claude --resume {sid}')
+            line = f"{row_idx:>{max_idx_w}}  {ts}  {short_dir}{' ' * dir_pad}"
+            if summary:
+                line += f"  {counter}{' ' * counter_pad}  {summary}"
+            print(line)
             continue
 
-        # Time color: green <1h, yellow <24h, dim gray older
+        # Time color: light green <1h, light yellow <24h, light gray older
         if age_hours < 1:
-            time_color = "\033[32m"      # green
+            time_color = "\033[38;5;157m"  # light green
         elif age_hours < 24:
-            time_color = "\033[33m"      # yellow
+            time_color = "\033[38;5;229m"  # light yellow
         else:
-            time_color = "\033[90m"      # dim gray
+            time_color = "\033[38;5;249m"  # light gray
 
         reset = "\033[0m"
-        cmd_color = "\033[38;5;103m"  # dim pastel purple
+        idx_color = "\033[38;5;245m"      # gray index
+        dir_color = "\033[38;5;183m"      # light purple
+        dim = "\033[38;5;242m"            # dim comment
+        title_color = "\033[38;5;215m"    # orange for custom titles
+        counter_color = "\033[38;5;110m"  # soft blue
 
-        cmd = f'cd "{proj_dir}" && claude --resume {sid}'
-        print(f"{time_color}{ts}{reset}  {cmd_color}{cmd}{reset}")
+        idx_str = f"{idx_color}{row_idx:>{max_idx_w}}{reset}"
+        time_str = f"{time_color}{ts}{reset}"
+        dir_str = f"{dir_color}{short_dir}{reset}{' ' * dir_pad}"
+
+        if title:
+            comment = f"  {counter_color}{counter}{reset}{' ' * counter_pad}  {title_color}{title}{reset}"
+        elif prompt:
+            comment = f"  {counter_color}{counter}{reset}{' ' * counter_pad}  {dim}{prompt}{reset}"
+        else:
+            comment = ""
+
+        print(f"{idx_str}  {time_str}  {dir_str}{comment}")
 
 
 if __name__ == "__main__":
