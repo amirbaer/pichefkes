@@ -63,10 +63,37 @@ def main():
                 decoded = decode_project_path(proj)
                 sessions.append((mtime, decoded, session_id))
 
+    use_color = sys.stdout.isatty()
+
     sessions.sort(reverse=True)
+    now = time.time()
     for mtime, proj_dir, sid in sessions[:limit]:
         ts = time.strftime("%b %d %H:%M", time.localtime(mtime))
-        print(f'{ts}  cd "{proj_dir}" && claude --resume {sid}')
+        age_hours = (now - mtime) / 3600
+
+        if not use_color:
+            print(f'{ts}  cd "{proj_dir}" && claude --resume {sid}')
+            continue
+
+        # Time color: green <1h, yellow <24h, dim gray older
+        if age_hours < 1:
+            time_color = "\033[32m"      # green
+        elif age_hours < 24:
+            time_color = "\033[33m"      # yellow
+        else:
+            time_color = "\033[90m"      # dim gray
+
+        reset = "\033[0m"
+        cyan = "\033[36m"
+        white = "\033[97m"
+        dim = "\033[90m"
+
+        print(
+            f"{time_color}{ts}{reset}  "
+            f"{cyan}cd{reset} {white}\"{proj_dir}\"{reset} "
+            f"{dim}&&{reset} "
+            f"{cyan}claude --resume{reset} {white}{sid}{reset}"
+        )
 
 
 if __name__ == "__main__":
