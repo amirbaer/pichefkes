@@ -84,16 +84,10 @@ def main():
             time_color = "\033[90m"      # dim gray
 
         reset = "\033[0m"
-        cyan = "\033[36m"
-        white = "\033[97m"
-        dim = "\033[90m"
+        cmd_color = "\033[38;5;103m"  # dim pastel purple
 
-        print(
-            f"{time_color}{ts}{reset}  "
-            f"{cyan}cd{reset} {white}\"{proj_dir}\"{reset} "
-            f"{dim}&&{reset} "
-            f"{cyan}claude --resume{reset} {white}{sid}{reset}"
-        )
+        cmd = f'cd "{proj_dir}" && claude --resume {sid}'
+        print(f"{time_color}{ts}{reset}  {cmd_color}{cmd}{reset}")
 
 
 if __name__ == "__main__":
