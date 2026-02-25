@@ -106,6 +106,12 @@ def extract_session_meta(fpath, msg_index=None):
     }
 
 
+def get_birth_time(fpath):
+    """Get file creation time, falling back to mtime if birthtime unavailable."""
+    st = os.stat(fpath)
+    return getattr(st, "st_birthtime", st.st_mtime)
+
+
 def collect_sessions(projects_dir, msg_index):
     """Collect and sort all sessions."""
     sessions = []
@@ -116,11 +122,11 @@ def collect_sessions(projects_dir, msg_index):
         for f in os.listdir(proj_path):
             if f.endswith(".jsonl"):
                 fpath = os.path.join(proj_path, f)
-                mtime = os.path.getmtime(fpath)
+                btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
                 decoded = decode_project_path(proj)
                 meta = extract_session_meta(fpath, msg_index=msg_index)
-                sessions.append((mtime, decoded, session_id, meta))
+                sessions.append((btime, decoded, session_id, meta))
     sessions.sort(reverse=True)
     return sessions
 
@@ -194,22 +200,23 @@ def main():
 
     # Build rows
     rows = []
-    for i, (mtime, proj_dir, sid, meta) in enumerate(display, 1):
-        ts = time.strftime("%b %d %H:%M", time.localtime(mtime))
+    for i, (btime, proj_dir, sid, meta) in enumerate(display, 1):
+        ts = time.strftime("%b %d %H:%M", time.localtime(btime))
         # Shorten path: replace home with ~
         short_dir = proj_dir.replace(home, "~", 1)
-        rows.append((i, mtime, ts, short_dir, meta))
+        short_hash = sid[:8]
+        rows.append((i, btime, ts, short_dir, short_hash, meta))
 
     # Compute column widths for alignment
     max_idx_w = len(str(len(rows)))
     max_dir_len = max((len(r[3]) for r in rows), default=0)
     max_counter_len = max(
-        (len(f"[{r[4]['shown']}/{r[4]['total']}]") for r in rows if r[4]["total"] > 0),
+        (len(f"[{r[5]['shown']}/{r[5]['total']}]") for r in rows if r[5]["total"] > 0),
         default=0,
     )
 
-    for row_idx, mtime, ts, short_dir, meta in rows:
-        age_hours = (now - mtime) / 3600
+    for row_idx, btime, ts, short_dir, short_hash, meta in rows:
+        age_hours = (now - btime) / 3600
         title = meta["title"]
         prompt = meta["prompt"]
         total = meta["total"]
@@ -225,22 +232,29 @@ def main():
         counter_pad = max_counter_len - len(counter)
 
         if not use_color:
-            line = f"{row_idx:>{max_idx_w}}  {ts}  {short_dir}{' ' * dir_pad}"
+            line = f"{row_idx:>{max_idx_w}}  {ts}  {short_hash}  {short_dir}{' ' * dir_pad}"
             if summary:
                 line += f"  {counter}{' ' * counter_pad}  {summary}"
             print(line)
             continue
 
-        # Time color: light green <1h, light yellow <24h, light gray older
+        # Time color by age
         if age_hours < 1:
-            time_color = "\033[38;5;157m"  # light green
+            time_color = "\033[38;5;48m"   # bright green - just now
+        elif age_hours < 6:
+            time_color = "\033[38;5;114m"  # muted green - today recent
         elif age_hours < 24:
-            time_color = "\033[38;5;229m"  # light yellow
+            time_color = "\033[38;5;229m"  # yellow - today earlier
+        elif age_hours < 48:
+            time_color = "\033[38;5;216m"  # light orange - yesterday
+        elif age_hours < 168:
+            time_color = "\033[38;5;249m"  # light gray - this week
         else:
-            time_color = "\033[38;5;249m"  # light gray
+            time_color = "\033[38;5;242m"  # dim gray - older
 
         reset = "\033[0m"
         idx_color = "\033[38;5;245m"      # gray index
+        hash_color = "\033[38;5;245m"     # gray hash
         dir_color = "\033[38;5;183m"      # light purple
         dim = "\033[38;5;242m"            # dim comment
         title_color = "\033[38;5;215m"    # orange for custom titles
@@ -248,6 +262,7 @@ def main():
 
         idx_str = f"{idx_color}{row_idx:>{max_idx_w}}{reset}"
         time_str = f"{time_color}{ts}{reset}"
+        hash_str = f"{hash_color}{short_hash}{reset}"
         dir_str = f"{dir_color}{short_dir}{reset}{' ' * dir_pad}"
 
         if title:
@@ -257,7 +272,7 @@ def main():
         else:
             comment = ""
 
-        print(f"{idx_str}  {time_str}  {dir_str}{comment}")
+        print(f"{idx_str}  {time_str}  {hash_str}  {dir_str}{comment}")
 
 
 if __name__ == "__main__":
