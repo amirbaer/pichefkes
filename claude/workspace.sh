@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Workspace save/load for Claude Code sessions
-# Usage: wsave [name], wlist, wload <name>
+# Usage: wsave [name], wlist, wload <name>, wdel <name>
 
 WORKSPACE_DIR="$HOME/.claude/workspaces"
 
@@ -47,6 +47,54 @@ _ws_random_name() {
     echo "${animals[$idx]}"
 }
 
+_ws_tmux_tabs() {
+    # Output tab entries for all windows in the current tmux session.
+    # Format: "window_name" for plain shells, "window_name:uuid" for claude sessions.
+    [[ -z "$TMUX" ]] && return 1
+
+    # Map pane PID -> window name
+    local win_info
+    win_info=$(tmux list-windows -F '#{pane_pid} #{window_name}' 2>/dev/null) || return 1
+
+    # Snapshot process table once
+    local ps_snap
+    ps_snap=$(ps -A -o pid=,ppid=,args=)
+
+    echo "$win_info" | while IFS=' ' read -r pane_pid win_name; do
+        [[ -n "$pane_pid" ]] || continue
+
+        # Check if this pane has a claude child process
+        _cl=$(echo "$ps_snap" | awk -v p="$pane_pid" '$2 == p && /claude/ {print; exit}')
+
+        if [[ -z "$_cl" ]]; then
+            echo "$win_name"
+        else
+            _cpid=$(echo "$_cl" | awk '{print $1}')
+            _uuid=""
+
+            if [[ "$_cl" == *"--resume"* ]]; then
+                _uuid=$(echo "$_cl" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+            else
+                _cwd=$(lsof -p "$_cpid" -Fn 2>/dev/null | awk '/^fcwd/{getline; sub(/^n/,""); print; exit}')
+                if [[ -n "$_cwd" ]]; then
+                    _enc=$(_ws_encode_path "$_cwd")
+                    _pdir="$HOME/.claude/projects/${_enc}"
+                    if [[ -d "$_pdir" ]]; then
+                        _newest=$(ls -t "$_pdir"/*.jsonl 2>/dev/null | head -1)
+                        [[ -n "$_newest" ]] && _uuid=$(basename "$_newest" .jsonl)
+                    fi
+                fi
+            fi
+
+            if [[ -n "$_uuid" ]]; then
+                echo "${win_name}:${_uuid}"
+            else
+                echo "$win_name"
+            fi
+        fi
+    done
+}
+
 wsave() {
     local name="$1"
     local dir="$(pwd)"
@@ -86,20 +134,31 @@ branch=$branch
 saved=$saved
 EOF
 
-    # Find sessions matching this branch
     local count=0
-    for jsonl in "$project_dir"/*.jsonl; do
-        [[ -f "$jsonl" ]] || continue
-        local uuid="$(basename "$jsonl" .jsonl)"
-        local session_branch="$(_ws_session_branch "$jsonl")"
 
-        if [[ "$session_branch" == "$branch" ]]; then
-            echo "session=$uuid" >> "$ws_file"
-            count=$((count + 1))
-        fi
-    done
+    if [[ -n "$TMUX" ]]; then
+        # Inside tmux: save tabs with window names and claude UUIDs
+        local tab_entry
+        while IFS= read -r tab_entry; do
+            [[ -n "$tab_entry" ]] || continue
+            echo "tab=$tab_entry" >> "$ws_file"
+            [[ "$tab_entry" == *:* ]] && count=$((count + 1))
+        done < <(_ws_tmux_tabs)
+        echo "saved workspace '$name' ($count sessions from tmux) -> $ws_file"
+    else
+        # Outside tmux: fall back to branch scanning (no tab names available)
+        for jsonl in "$project_dir"/*.jsonl; do
+            [[ -f "$jsonl" ]] || continue
+            local uuid="$(basename "$jsonl" .jsonl)"
+            local session_branch="$(_ws_session_branch "$jsonl")"
 
-    echo "saved workspace '$name' ($count sessions) -> $ws_file"
+            if [[ "$session_branch" == "$branch" ]]; then
+                echo "session=$uuid" >> "$ws_file"
+                count=$((count + 1))
+            fi
+        done
+        echo "saved workspace '$name' ($count sessions from branch scan) -> $ws_file"
+    fi
 }
 
 wlist() {
@@ -130,6 +189,7 @@ wlist() {
                 branch) branch="$value" ;;
                 saved) saved="$value" ;;
                 session) session_count=$((session_count + 1)) ;;
+                tab) [[ "$value" == *:* ]] && session_count=$((session_count + 1)) ;;
             esac
         done < "$ws_file"
 
@@ -195,12 +255,14 @@ wload() {
     fi
 
     local dir branch
-    local sessions=()
+    local tabs=()      # "win_name:uuid" or "win_name"
+    local sessions=()  # legacy: bare uuids
 
     while IFS='=' read -r key value || [[ -n "$key" ]]; do
         case "$key" in
             dir) dir="$value" ;;
             branch) branch="$value" ;;
+            tab) tabs+=("$value") ;;
             session) sessions+=("$value") ;;
         esac
     done < "$ws_file"
@@ -214,19 +276,65 @@ wload() {
         return 0
     fi
 
-    # Create tmux session with window 0 as shell in repo dir
-    tmux new-session -d -s "$tmux_session" -c "$dir"
-    tmux rename-window -t "$tmux_session:0" "shell"
+    if [[ ${#tabs[@]} -gt 0 ]]; then
+        # New format: restore tabs with original window names
+        local first=1 win_idx=0
+        local tab_entry
+        for tab_entry in "${tabs[@]}"; do
+            local win_name uuid=""
+            if [[ "$tab_entry" == *:* ]]; then
+                win_name="${tab_entry%%:*}"
+                uuid="${tab_entry#*:}"
+            else
+                win_name="$tab_entry"
+            fi
 
-    # Create a window for each Claude session
-    local i=1
-    for uuid in "${sessions[@]}"; do
-        tmux new-window -t "$tmux_session" -n "claude-${i}" -c "$dir"
-        tmux send-keys -t "$tmux_session:${i}" "claude --resume ${uuid}" Enter
-        i=$((i + 1))
-    done
+            if [[ $first -eq 1 ]]; then
+                tmux new-session -d -s "$tmux_session" -c "$dir"
+                tmux rename-window -t "$tmux_session:${win_idx}" "$win_name"
+                first=0
+            else
+                tmux new-window -t "$tmux_session" -n "$win_name" -c "$dir"
+            fi
 
-    # Select window 0 and attach
+            if [[ -n "$uuid" ]]; then
+                tmux send-keys -t "$tmux_session:${win_idx}" "claude --resume ${uuid}" Enter
+            fi
+            win_idx=$((win_idx + 1))
+        done
+    else
+        # Legacy format: bare session UUIDs
+        tmux new-session -d -s "$tmux_session" -c "$dir"
+        tmux rename-window -t "$tmux_session:0" "shell"
+
+        local i=1
+        for uuid in "${sessions[@]}"; do
+            tmux new-window -t "$tmux_session" -n "claude-${i}" -c "$dir"
+            tmux send-keys -t "$tmux_session:${i}" "claude --resume ${uuid}" Enter
+            i=$((i + 1))
+        done
+    fi
+
+    # Select first window and attach
     tmux select-window -t "$tmux_session:0"
     tmux attach-session -t "$tmux_session"
+}
+
+wdel() {
+    local name="$1"
+    if [[ -z "$name" ]]; then
+        echo "usage: wdel <name>"
+        echo "available workspaces:"
+        wlist
+        return 1
+    fi
+
+    local ws_file="$WORKSPACE_DIR/${name}.ws"
+    if [[ ! -f "$ws_file" ]]; then
+        echo "error: workspace '$name' not found"
+        return 1
+    fi
+
+    command rm "$ws_file"
+    echo "deleted workspace '$name'"
 }
