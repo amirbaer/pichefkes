@@ -178,10 +178,10 @@ wlist() {
     local rst=$'\033[0m'
 
     # Collect rows to compute column widths
-    local names=() dirs=() repos=() branches=() counts=() dates=()
+    local names=() dirs=() repos=() branches=() counts=() tab_counts=() dates=() date_colors=()
 
     for ws_file in "${ws_files[@]}"; do
-        local name="" dir="" branch="" saved="" session_count=0
+        local name="" dir="" branch="" saved="" session_count=0 tab_count=0
 
         while IFS='=' read -r key value || [[ -n "$key" ]]; do
             case "$key" in
@@ -189,7 +189,7 @@ wlist() {
                 branch) branch="$value" ;;
                 saved) saved="$value" ;;
                 session) session_count=$((session_count + 1)) ;;
-                tab) [[ "$value" == *:* ]] && session_count=$((session_count + 1)) ;;
+                tab) tab_count=$((tab_count + 1)); [[ "$value" == *:* ]] && session_count=$((session_count + 1)) ;;
             esac
         done < "$ws_file"
 
@@ -197,9 +197,28 @@ wlist() {
         local repo="$(basename "$dir")"
         dir="${dir/#$HOME/~}"
 
-        local short_date=""
+        local short_date="" date_color="$dim"
         if [[ -n "$saved" ]]; then
             short_date="$(date -j -f "%Y-%m-%dT%H:%M:%S" "$saved" "+%b %d %H:%M" 2>/dev/null || echo "$saved")"
+            # Age-based color (matches claude-sessions.py)
+            local saved_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$saved" "+%s" 2>/dev/null)
+            local now_epoch=$(date "+%s")
+            if [[ -n "$saved_epoch" ]]; then
+                age_hours=$(( (now_epoch - saved_epoch) / 3600 ))
+                if (( age_hours < 1 )); then
+                    date_color=$'\033[38;5;48m'    # bright green - just now
+                elif (( age_hours < 6 )); then
+                    date_color=$'\033[38;5;114m'   # muted green - today recent
+                elif (( age_hours < 24 )); then
+                    date_color=$'\033[38;5;229m'   # yellow - today earlier
+                elif (( age_hours < 48 )); then
+                    date_color=$'\033[38;5;216m'   # light orange - yesterday
+                elif (( age_hours < 168 )); then
+                    date_color=$'\033[38;5;249m'   # light gray - this week
+                else
+                    date_color=$'\033[38;5;242m'   # dim gray - older
+                fi
+            fi
         fi
 
         names+=("$name")
@@ -207,7 +226,9 @@ wlist() {
         repos+=("$repo")
         branches+=("$branch")
         counts+=("$session_count")
+        tab_counts+=("$tab_count")
         dates+=("$short_date")
+        date_colors+=("$date_color")
     done
 
     # Compute max widths
@@ -219,8 +240,8 @@ wlist() {
     for _n in "${branches[@]}"; do (( ${#_n} > wb )) && wb=${#_n}; done
 
     # Header
-    printf "${dim}%-${wn}s  %-${wd}s  %-${wr}s  %-${wb}s  %4s  %s${rst}\n" \
-        "NAME" "DIR" "REPO" "BRANCH" "SESS" "SAVED"
+    printf "${dim}%-${wn}s  %-${wd}s  %-${wr}s  %-${wb}s  %4s  %4s  %s${rst}\n" \
+        "NAME" "DIR" "REPO" "BRANCH" "TABS" "SESS" "SAVED"
 
     # Rows — use paste to iterate parallel arrays (zsh/bash portable)
     local idx=0
@@ -231,10 +252,15 @@ wlist() {
         local _repo="${repos[$((idx + ${_WS_ARR_BASE:-0}))]}"
         local _branch="${branches[$((idx + ${_WS_ARR_BASE:-0}))]}"
         local _count="${counts[$((idx + ${_WS_ARR_BASE:-0}))]}"
+        local _tabs="${tab_counts[$((idx + ${_WS_ARR_BASE:-0}))]}"
         local _date="${dates[$((idx + ${_WS_ARR_BASE:-0}))]}"
+        local _dcol="${date_colors[$((idx + ${_WS_ARR_BASE:-0}))]}"
 
-        printf "${cyan}%-${wn}s${rst}  %-${wd}s  %-${wr}s  %-${wb}s  %4d  ${dim}%s${rst}\n" \
-            "$_name" "$_dir" "$_repo" "$_branch" "$_count" "$_date"
+        local tabs_str=""
+        [[ "$_tabs" -gt 0 ]] && tabs_str="$_tabs"
+
+        printf "${cyan}%-${wn}s${rst}  %-${wd}s  %-${wr}s  %-${wb}s  %4s  %4d  ${_dcol}%s${rst}\n" \
+            "$_name" "$_dir" "$_repo" "$_branch" "$tabs_str" "$_count" "$_date"
         idx=$((idx + 1))
     done
 }
