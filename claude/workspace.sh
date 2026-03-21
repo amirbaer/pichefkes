@@ -134,6 +134,13 @@ branch=$branch
 saved=$saved
 EOF
 
+    # Save tmux session name if inside tmux
+    if [[ -n "$TMUX" ]]; then
+        local tmux_name
+        tmux_name=$(tmux display-message -p '#S' 2>/dev/null)
+        [[ -n "$tmux_name" ]] && echo "tmux=$tmux_name" >> "$ws_file"
+    fi
+
     local count=0
 
     if [[ -n "$TMUX" ]]; then
@@ -280,7 +287,7 @@ wload() {
         return 1
     fi
 
-    local dir branch
+    local dir branch orig_tmux=""
     local tabs=()      # "win_name:uuid" or "win_name"
     local sessions=()  # legacy: bare uuids
 
@@ -288,14 +295,22 @@ wload() {
         case "$key" in
             dir) dir="$value" ;;
             branch) branch="$value" ;;
+            tmux) orig_tmux="$value" ;;
             tab) tabs+=("$value") ;;
             session) sessions+=("$value") ;;
         esac
     done < "$ws_file"
 
+    # Check if the original tmux session is still running
+    if [[ -n "$orig_tmux" ]] && tmux has-session -t "$orig_tmux" 2>/dev/null; then
+        echo "attaching to original tmux session '$orig_tmux'"
+        tmux attach-session -t "$orig_tmux"
+        return 0
+    fi
+
     local tmux_session="ws-${name}"
 
-    # If tmux session already exists, just attach
+    # If a wload-created session already exists, just attach
     if tmux has-session -t "$tmux_session" 2>/dev/null; then
         echo "attaching to existing tmux session '$tmux_session'"
         tmux attach-session -t "$tmux_session"
