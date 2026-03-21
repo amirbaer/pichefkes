@@ -142,6 +142,8 @@ def main():
     parser.add_argument("--first", action="store_true", help="show first user message instead of last")
     parser.add_argument("--msg", type=int, default=None, metavar="N",
                         help="message index: +N from start (0-based), -N from end")
+    parser.add_argument("--print", "-p", action="store_true", dest="print_only",
+                        help="print the resume command instead of running it")
     args, unknown = parser.parse_known_args()
 
     # Support bare +N / -N without --msg
@@ -187,12 +189,15 @@ def main():
             print(f"Invalid row {get_row}. Have {len(sessions)} sessions.", file=sys.stderr)
             sys.exit(1)
         _, proj_dir, sid, _ = sessions[idx]
-        cmd = f'cd "{proj_dir}" && claude --resume {sid}'
-        if sys.stdout.isatty():
-            print(f"\033[38;5;242m{cmd}\033[0m")
-        else:
-            print(cmd)
-        sys.exit(0)
+        if args.print_only:
+            cmd = f'cd "{proj_dir}" && claude --resume {sid}'
+            if sys.stdout.isatty():
+                print(f"\033[38;5;242m{cmd}\033[0m")
+            else:
+                print(cmd)
+            sys.exit(0)
+        os.chdir(proj_dir)
+        os.execvp("claude", ["claude", "--resume", sid])
 
     display = sessions[:limit]
     use_color = sys.stdout.isatty()
