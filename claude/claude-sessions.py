@@ -112,7 +112,7 @@ def get_birth_time(fpath):
     return getattr(st, "st_birthtime", st.st_mtime)
 
 
-def collect_sessions(projects_dir, msg_index):
+def collect_sessions(projects_dir, msg_index, include_auto=False):
     """Collect and sort all sessions."""
     sessions = []
     for proj in os.listdir(projects_dir):
@@ -122,6 +122,8 @@ def collect_sessions(projects_dir, msg_index):
         for f in os.listdir(proj_path):
             if f.endswith(".jsonl"):
                 fpath = os.path.join(proj_path, f)
+                if not include_auto and is_automated_session(fpath):
+                    continue
                 btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
                 decoded = decode_project_path(proj)
@@ -131,19 +133,42 @@ def collect_sessions(projects_dir, msg_index):
     return sessions
 
 
+def is_automated_session(fpath):
+    """Check if a session looks automated (first user message is just '-')."""
+    try:
+        with open(fpath, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "user":
+                    msg = _parse_user_msg(obj)
+                    return msg == "-"
+    except (OSError, UnicodeDecodeError):
+        pass
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="List Claude Code sessions",
         epilog="Message selection: default=last, --first=first, +N=Nth from start, -N=Nth from end. "
-               "Use --get N to print the resume command for row N.",
+               "Use --open N to resume session at row N.",
     )
     parser.add_argument("n", nargs="?", type=int, default=None,
-                        help="row number to get command for, or max sessions to list")
+                        help="max sessions to list (default: 20)")
+    parser.add_argument("--open", type=int, default=None, metavar="N",
+                        help="resume session at row N")
     parser.add_argument("--first", action="store_true", help="show first user message instead of last")
     parser.add_argument("--msg", type=int, default=None, metavar="N",
                         help="message index: +N from start (0-based), -N from end")
     parser.add_argument("--print", "-p", action="store_true", dest="print_only",
                         help="print the resume command instead of running it")
+    parser.add_argument("--auto", action="store_true",
+                        help="include automated sessions (hidden by default)")
     args, unknown = parser.parse_known_args()
 
     # Support bare +N / -N without --msg
@@ -167,21 +192,10 @@ def main():
         print("No Claude sessions found.", file=sys.stderr)
         sys.exit(1)
 
-    sessions = collect_sessions(projects_dir, msg_idx)
+    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto)
 
-    # If n is given and falls within the displayed range, treat as row getter
-    # Otherwise treat as limit
-    get_row = None
-    limit = 20
-    if args.n is not None:
-        if args.n <= len(sessions) and args.n >= 1 and args.n <= 20:
-            # Ambiguous: could be limit or row. Use heuristic:
-            # if it would be a valid row in the default view, treat as row getter
-            get_row = args.n
-        elif args.n > 20:
-            limit = args.n
-        else:
-            get_row = args.n
+    limit = args.n if args.n is not None else 20
+    get_row = args.open
 
     if get_row is not None:
         idx = get_row - 1
