@@ -112,8 +112,32 @@ def get_birth_time(fpath):
     return getattr(st, "st_birthtime", st.st_mtime)
 
 
-def collect_sessions(projects_dir, msg_index, include_auto=False):
+def extract_searchable_text(fpath):
+    """Extract all searchable text from a session: title + all user messages."""
+    parts = []
+    try:
+        with open(fpath, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "custom-title":
+                    parts.append(obj.get("customTitle", ""))
+                if obj.get("type") == "user":
+                    msg = _parse_user_msg(obj)
+                    if msg:
+                        parts.append(msg)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return "\n".join(parts).lower()
+
+
+def collect_sessions(projects_dir, msg_index, include_auto=False, search=None):
     """Collect and sort all sessions."""
+    search_lower = search.lower() if search else None
     sessions = []
     for proj in os.listdir(projects_dir):
         proj_path = os.path.join(projects_dir, proj)
@@ -124,9 +148,15 @@ def collect_sessions(projects_dir, msg_index, include_auto=False):
                 fpath = os.path.join(proj_path, f)
                 if not include_auto and is_automated_session(fpath):
                     continue
+                if search_lower:
+                    decoded = decode_project_path(proj)
+                    haystack = decoded.lower() + "\n" + extract_searchable_text(fpath)
+                    if search_lower not in haystack:
+                        continue
+                else:
+                    decoded = decode_project_path(proj)
                 btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
-                decoded = decode_project_path(proj)
                 meta = extract_session_meta(fpath, msg_index=msg_index)
                 sessions.append((btime, decoded, session_id, meta))
     sessions.sort(reverse=True)
@@ -167,6 +197,8 @@ def main():
                         help="message index: +N from start (0-based), -N from end")
     parser.add_argument("--print", "-p", action="store_true", dest="print_only",
                         help="print the resume command instead of running it")
+    parser.add_argument("--search", "-s", type=str, default=None, metavar="TERM",
+                        help="search sessions by title, user messages, and project path")
     parser.add_argument("--auto", action="store_true",
                         help="include automated sessions (hidden by default)")
     args, unknown = parser.parse_known_args()
@@ -192,9 +224,10 @@ def main():
         print("No Claude sessions found.", file=sys.stderr)
         sys.exit(1)
 
-    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto)
+    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search)
 
-    limit = args.n if args.n is not None else 20
+    default_limit = None if args.search else 20
+    limit = args.n if args.n is not None else default_limit
     get_row = args.open
 
     if get_row is not None:
