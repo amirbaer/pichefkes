@@ -97,9 +97,20 @@ For each unresolved bot comment:
 4. If the fix is too large or complex (e.g., requires a major refactor, touches many files, or has unclear trade-offs), ask the user for guidance instead of skipping.
 5. After applying fixes, stage, commit with a message referencing the bot feedback, and push.
 
-After pushing fixes, resolve the addressed review threads:
+After pushing fixes, reply to each addressed bot comment explaining what was done (or why it's a false positive), then resolve the thread:
+
+1. **Reply** to the comment with a short explanation of the fix (e.g., "Fixed: changed `remeidation` → `remediation` in coverage_report.py line 298, commit abc1234"):
 ```bash
-# For GraphQL thread resolution (preferred for review comments):
+# For review comments (pulls/comments):
+gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body="Fixed: <explanation>"
+
+# For issue-style comments:
+gh api repos/{owner}/{repo}/issues/{number}/comments -f body="Fixed: <explanation>"
+```
+
+2. **Resolve** the review thread:
+```bash
+# First find the thread ID:
 gh api graphql -f query='
   query {
     repository(owner: "OWNER", name: "REPO") {
@@ -120,10 +131,8 @@ gh api graphql -f query='
     }
   }
 '
-```
 
-Then resolve each addressed thread:
-```bash
+# Then resolve it:
 gh api graphql -f query='
   mutation {
     resolveReviewThread(input: {threadId: "THREAD_NODE_ID"}) {
