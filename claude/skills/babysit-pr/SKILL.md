@@ -1,6 +1,6 @@
 ---
 name: babysit-pr
-description: Monitor the current branch's open PR for failing checks and unresolved bot comments (e.g. cursorbot), then fix the issues, push, and resolve the comments. Use with `/loop` for continuous monitoring.
+description: Monitor the current branch's open PR for merge conflicts, failing checks, and unresolved bot comments (e.g. cursorbot), then fix the issues, push, and resolve the comments. Use with `/loop` for continuous monitoring.
 argument-hint: [pr-number]
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob, Agent
 ---
@@ -16,7 +16,7 @@ Monitor an open pull request for failing CI checks and unresolved bot review com
 
 ## Steps
 
-**IMPORTANT: Always execute steps 2–4 fully on every iteration. Do NOT shortcut by checking thread counts or combining queries to skip steps. The REST API queries in step 4 are the only reliable way to detect bot comments — GraphQL review thread counts will miss them.**
+**IMPORTANT: Always execute steps 2–5 fully on every iteration. Do NOT shortcut by checking thread counts or combining queries to skip steps. The REST API queries in step 5 are the only reliable way to detect bot comments — GraphQL review thread counts will miss them.**
 
 ### 1. Identify the PR
 
@@ -27,7 +27,26 @@ gh pr view --json number,url,headRefName,state -q '.'
 
 Confirm the PR is open. If not, stop and report.
 
-### 2. Wait for Cursor Bugbot to finish
+### 2. Check for merge conflicts
+
+```bash
+gh pr view --json mergeable,mergeStateStatus -q '.'
+```
+
+If the PR has merge conflicts (`mergeable` is `"CONFLICTING"` or `mergeStateStatus` is `"DIRTY"`):
+1. Fetch and merge the base branch locally:
+   ```bash
+   git fetch origin
+   base_branch=$(gh pr view --json baseRefName -q '.baseRefName')
+   git merge "origin/$base_branch"
+   ```
+2. Resolve the conflicts in each file. Read the conflicted files, understand both sides, and pick the correct resolution (preserving changes from both branches where appropriate).
+3. After resolving all conflicts, stage the files, commit the merge, and push.
+4. If the conflicts are too complex to resolve confidently, escalate to the user.
+
+If no merge conflicts, proceed to the next step.
+
+### 3. Wait for Cursor Bugbot to finish
 
 Before checking results, see if Cursor Bugbot (or similar bot checks) is still running:
 
@@ -51,17 +70,17 @@ If any Cursor Bugbot check is still in progress:
      fi
    done
    ```
-3. Once finished, proceed to step 3. The bot may have added new review comments that need to be addressed.
+3. Once finished, proceed to step 4. The bot may have added new review comments that need to be addressed.
 
-If no Cursor Bugbot check is running (or none exists), proceed immediately to step 3.
+If no Cursor Bugbot check is running (or none exists), proceed immediately to step 4.
 
-### 3. Check for failing checks
+### 4. Check for failing checks
 
 ```bash
 gh pr checks --json name,state,conclusion,link --jq '.[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .state == "FAILURE")'
 ```
 
-If there are no failing checks, report "All checks passing" and move to step 4 (bot comments).
+If there are no failing checks, report "All checks passing" and move to step 5 (bot comments).
 
 For each failing check:
 1. Read the check name and link to understand what failed.
@@ -78,7 +97,7 @@ Common check failures and how to fix them:
 - **go-coverage**: Fix failing Go tests.
 - **lint / typecheck**: Fix the reported issues in the source.
 
-### 4. Check for unresolved bot comments
+### 5. Check for unresolved bot comments
 
 ```bash
 # Get all review comments on the PR
@@ -142,11 +161,11 @@ gh api graphql -f query='
 '
 ```
 
-### 5. Loop until clean
+### 6. Loop until clean
 
-After completing steps 2–4, if there were no failing checks AND no bot comments found, the PR is clean — report success and stop.
+After completing steps 2–5, if there were no failing checks AND no bot comments found, the PR is clean — report success and stop.
 
-If fixes were pushed, loop back to step 2 and repeat the full cycle. Always run steps 2–4 completely each iteration — the REST API queries in step 4 are the ONLY way to reliably detect bot comments. Never skip step 4 or substitute it with a GraphQL thread count.
+If fixes were pushed, loop back to step 2 and repeat the full cycle. Always run steps 2–5 completely each iteration — the REST API queries in step 5 are the ONLY way to reliably detect bot comments. Never skip step 5 or substitute it with a GraphQL thread count.
 
 Stop looping if:
 - The max iteration count is reached (default 5). Report remaining issues to the user.
@@ -155,7 +174,7 @@ Stop looping if:
 
 Track the iteration count and report it (e.g., "Iteration 2/5").
 
-### 6. Report
+### 7. Report
 
 Summarize what was done:
 - Which checks were failing and how they were fixed
