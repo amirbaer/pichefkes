@@ -12,9 +12,11 @@ Monitor an open pull request for failing CI checks and unresolved bot review com
 ## Arguments
 
 - PR number (optional) — Pass as a bare number (e.g., `/babysit-pr 123`). If omitted, detect from the current branch using `gh pr view --json number -q .number`.
-- `--loop N` (optional, default: 5) — Maximum fix cycles before stopping. E.g., `/babysit-pr --loop 3` or `/babysit-pr 123 --loop 3`.
+- `--loop [N]` (optional) — Maximum fix cycles before stopping. If N is omitted or `--loop` is not specified, defaults to 5. E.g., `/babysit-pr --loop 3` or `/babysit-pr 123 --loop`.
 
 ## Steps
+
+**IMPORTANT: Always execute steps 2–4 fully on every iteration. Do NOT shortcut by checking thread counts or combining queries to skip steps. The REST API queries in step 4 are the only reliable way to detect bot comments — GraphQL review thread counts will miss them.**
 
 ### 1. Identify the PR
 
@@ -80,12 +82,12 @@ Common check failures and how to fix them:
 
 ```bash
 # Get all review comments on the PR
-gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | select(.user.login | test("bot|cursor|coderabbit|copilot"; "i")) | {id, user: .user.login, path, line, body, in_reply_to_id}'
+gh api repos/{owner}/{repo}/pulls/{number}/comments --jq '.[] | select(.user.login | test("bot|cursor|coderabbit|copilot|claude"; "i")) | {id, user: .user.login, path, line, body, in_reply_to_id}'
 ```
 
 Also check issue-style comments:
 ```bash
-gh api repos/{owner}/{repo}/issues/{number}/comments --jq '.[] | select(.user.login | test("bot|cursor|coderabbit|copilot"; "i")) | {id, user: .user.login, body}'
+gh api repos/{owner}/{repo}/issues/{number}/comments --jq '.[] | select(.user.login | test("bot|cursor|coderabbit|copilot|claude"; "i")) | {id, user: .user.login, body}'
 ```
 
 For each unresolved bot comment:
@@ -133,7 +135,9 @@ gh api graphql -f query='
 
 ### 5. Loop until clean
 
-After pushing fixes, loop back to step 2 and repeat the full cycle (wait for bots, check failures, check bot comments, fix, push). At the **start** of each iteration, check if there are any failing checks or unresolved bot comments — if everything is clean, stop early and report success.
+After completing steps 2–4, if there were no failing checks AND no bot comments found, the PR is clean — report success and stop.
+
+If fixes were pushed, loop back to step 2 and repeat the full cycle. Always run steps 2–4 completely each iteration — the REST API queries in step 4 are the ONLY way to reliably detect bot comments. Never skip step 4 or substitute it with a GraphQL thread count.
 
 Stop looping if:
 - The max iteration count is reached (default 5). Report remaining issues to the user.
