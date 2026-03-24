@@ -135,13 +135,17 @@ def extract_searchable_text(fpath):
     return "\n".join(parts).lower()
 
 
-def collect_sessions(projects_dir, msg_index, include_auto=False, search=None):
+def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, dir_filter=None):
     """Collect and sort all sessions."""
     search_lower = search.lower() if search else None
+    dir_filter_lower = dir_filter.lower() if dir_filter else None
     sessions = []
     for proj in os.listdir(projects_dir):
         proj_path = os.path.join(projects_dir, proj)
         if not os.path.isdir(proj_path):
+            continue
+        decoded = decode_project_path(proj)
+        if dir_filter_lower and dir_filter_lower not in decoded.lower():
             continue
         for f in os.listdir(proj_path):
             if f.endswith(".jsonl"):
@@ -149,12 +153,9 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None):
                 if not include_auto and is_automated_session(fpath):
                     continue
                 if search_lower:
-                    decoded = decode_project_path(proj)
                     haystack = decoded.lower() + "\n" + extract_searchable_text(fpath)
                     if search_lower not in haystack:
                         continue
-                else:
-                    decoded = decode_project_path(proj)
                 btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
                 meta = extract_session_meta(fpath, msg_index=msg_index)
@@ -199,6 +200,8 @@ def main():
                         help="print the resume command instead of running it")
     parser.add_argument("--search", "-s", type=str, default=None, metavar="TERM",
                         help="search sessions by title, user messages, and project path")
+    parser.add_argument("--dir", "-d", type=str, default=None, metavar="PATH",
+                        help="filter sessions by project directory (substring match)")
     parser.add_argument("--auto", action="store_true",
                         help="include automated sessions (hidden by default)")
     args, unknown = parser.parse_known_args()
@@ -224,9 +227,9 @@ def main():
         print("No Claude sessions found.", file=sys.stderr)
         sys.exit(1)
 
-    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search)
+    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search, dir_filter=args.dir)
 
-    default_limit = None if args.search else 20
+    default_limit = None if (args.search or args.dir) else 20
     limit = args.n if args.n is not None else default_limit
     get_row = args.open
 
