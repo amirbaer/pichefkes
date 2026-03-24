@@ -138,15 +138,22 @@ def extract_searchable_text(fpath):
 def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, dir_filter=None):
     """Collect and sort all sessions."""
     search_lower = search.lower() if search else None
-    dir_filter_lower = dir_filter.lower() if dir_filter else None
+    dir_filter_norm = dir_filter.rstrip("/").lower() if dir_filter else None
+    dir_filter_is_abs = dir_filter_norm and os.path.isabs(dir_filter) if dir_filter else False
     sessions = []
     for proj in os.listdir(projects_dir):
         proj_path = os.path.join(projects_dir, proj)
         if not os.path.isdir(proj_path):
             continue
         decoded = decode_project_path(proj)
-        if dir_filter_lower and dir_filter_lower not in decoded.lower():
-            continue
+        if dir_filter_norm:
+            decoded_lower = decoded.rstrip("/").lower()
+            if dir_filter_is_abs:
+                if not decoded_lower.startswith(dir_filter_norm):
+                    continue
+            else:
+                if dir_filter_norm not in decoded_lower:
+                    continue
         for f in os.listdir(proj_path):
             if f.endswith(".jsonl"):
                 fpath = os.path.join(proj_path, f)
@@ -227,7 +234,14 @@ def main():
         print("No Claude sessions found.", file=sys.stderr)
         sys.exit(1)
 
-    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search, dir_filter=args.dir)
+    dir_filter = args.dir
+    if dir_filter:
+        expanded = os.path.abspath(os.path.expanduser(dir_filter))
+        if os.path.isdir(expanded):
+            dir_filter = expanded
+        # else keep as-is for substring match
+
+    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search, dir_filter=dir_filter)
 
     default_limit = None if (args.search or args.dir) else 20
     limit = args.n if args.n is not None else default_limit
