@@ -166,6 +166,8 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, d
                 btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
                 meta = extract_session_meta(fpath, msg_index=msg_index)
+                if not include_auto and meta["total"] <= 1:
+                    continue
                 sessions.append((btime, decoded, session_id, meta))
     sessions.sort(reverse=True)
     return sessions
