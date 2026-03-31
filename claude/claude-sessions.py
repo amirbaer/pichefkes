@@ -166,15 +166,13 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, d
                 btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
                 meta = extract_session_meta(fpath, msg_index=msg_index)
-                if not include_auto and meta["total"] <= 1:
-                    continue
                 sessions.append((btime, decoded, session_id, meta))
     sessions.sort(reverse=True)
     return sessions
 
 
 def is_automated_session(fpath):
-    """Check if a session looks automated (first user message is just '-')."""
+    """Check if a session is non-interactive (entrypoint != 'cli')."""
     try:
         with open(fpath, "r") as f:
             for line in f:
@@ -185,8 +183,7 @@ def is_automated_session(fpath):
                 except json.JSONDecodeError:
                     continue
                 if obj.get("type") == "user":
-                    msg = _parse_user_msg(obj)
-                    return msg == "-"
+                    return obj.get("entrypoint") != "cli"
     except (OSError, UnicodeDecodeError):
         pass
     return False
