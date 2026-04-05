@@ -163,9 +163,9 @@ gh api graphql -f query='
 
 ### 6. Loop until clean
 
-After completing steps 2–5, if there were no failing checks AND no bot comments found, the PR is clean — report success and stop.
+If fixes were pushed during this iteration, you MUST loop back to step 2 and repeat the full cycle — pushing triggers new Bugbot runs and CI checks that must be waited on before declaring the PR clean.
 
-If fixes were pushed, loop back to step 2 and repeat the full cycle. Always run steps 2–5 completely each iteration — the REST API queries in step 5 are the ONLY way to reliably detect bot comments. Never skip step 5 or substitute it with a GraphQL thread count.
+Only declare the PR clean after completing a full iteration of steps 2–5 where NO fixes were needed (no merge conflicts, no failing checks, no unresolved bot comments). Always run steps 2–5 completely each iteration — the REST API queries in step 5 are the ONLY way to reliably detect bot comments. Never skip step 5 or substitute it with a GraphQL thread count.
 
 Stop looping if:
 - The max iteration count is reached (default 5). Report remaining issues to the user.
