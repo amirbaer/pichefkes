@@ -47,7 +47,7 @@ _workclone_dirs() {
   for dir in "$WORKCLONE_DIR"/*/; do
     [[ -d "$dir/.git" ]] && dirs+=("$dir")
   done
-  printf '%s\n' "${dirs[@]}"
+  printf '%s\n' "${dirs[@]}" | sort -V
 }
 
 function workls() {
