@@ -1,0 +1,7 @@
+hardstatus alwayslastline
+hardstatus string "%{gk}[ %{G}%H %{g}][%= %{wk}%?%-Lw%?%{r}(%{W}%n*%f %t%?(%u)%?%{r})%{w}%?%+Lw%?%?%= %{g}][%{B} %d/%m %{W}%c %{g}]"
+vbell off
+startup_message off
+defscrollback 100000
+title off
+

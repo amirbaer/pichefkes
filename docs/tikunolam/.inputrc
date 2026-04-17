@@ -1,0 +1,4 @@
+Control-W: backward-kill-word
+Control-G: kill-word
+Control-Y: backward-word
+Control-J: forward-word

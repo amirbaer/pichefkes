@@ -1,0 +1,38 @@
+
+<html>
+
+  <head> 
+    <script src="jquery-1.11.2.min.js"></script> 
+    <script> 
+    $(function(){
+      $("#screenContent").load(".screenrc"); 
+      $("#vimContent").load(".vimrc"); 
+      $("#inputrcContent").load(".inputrc"); 
+    });
+    </script> 
+  </head> 
+
+  <body background="kanye_pointing.png"> 
+
+    <h1><a href=".screenrc" download=".screenrc">screen</a></h1>
+    <pre>
+     <div style="color:#0033FF" id="screenContent"></div>
+    </pre>
+
+    </p>
+
+    <h1><a href=".vimrc" download=".vimrc">vim</a></h1>
+    <pre>
+     <div style="color:#0066FF" id="vimContent"></div>
+    </pre>
+
+    </p>
+
+    <h1><a href=".inputrc" download=".inputrc">inputrc</a></h1>
+    <pre>
+     <div style="color:#0066FF" id="inputrcContent"></div>
+    </pre>
+
+  </body> 
+
+</html>
