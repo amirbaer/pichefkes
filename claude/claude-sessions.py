@@ -56,7 +56,7 @@ def _parse_user_msg(obj):
 
 
 def extract_session_meta(fpath, msg_index=None):
-    """Extract custom title and a user message from a session file.
+    """Extract custom title, user messages, and cwd from a session file.
 
     msg_index: None = last message (default)
                0 = first, 1 = second, ...  (from start)
@@ -64,6 +64,7 @@ def extract_session_meta(fpath, msg_index=None):
     """
     all_msgs = []
     custom_title = ""
+    cwd = ""
     try:
         with open(fpath, "r") as f:
             for line in f:
@@ -79,6 +80,10 @@ def extract_session_meta(fpath, msg_index=None):
                     msg = _parse_user_msg(obj)
                     if msg:
                         all_msgs.append(msg)
+                if not cwd:
+                    line_cwd = obj.get("cwd")
+                    if line_cwd:
+                        cwd = line_cwd
     except (OSError, UnicodeDecodeError):
         pass
 
@@ -103,6 +108,7 @@ def extract_session_meta(fpath, msg_index=None):
         "prompt": user_msg[:80],
         "total": total,
         "shown": shown_idx + 1,  # 1-based for display
+        "cwd": cwd,
     }
 
 
@@ -146,27 +152,28 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, d
         if not os.path.isdir(proj_path):
             continue
         decoded = decode_project_path(proj)
-        if dir_filter_norm:
-            decoded_lower = decoded.rstrip("/").lower()
-            if dir_filter_is_abs:
-                if not decoded_lower.startswith(dir_filter_norm):
-                    continue
-            else:
-                if dir_filter_norm not in decoded_lower:
-                    continue
         for f in os.listdir(proj_path):
             if f.endswith(".jsonl"):
                 fpath = os.path.join(proj_path, f)
                 if not include_auto and is_automated_session(fpath):
                     continue
+                meta = extract_session_meta(fpath, msg_index=msg_index)
+                proj_dir = meta["cwd"] or decoded
+                if dir_filter_norm:
+                    proj_lower = proj_dir.rstrip("/").lower()
+                    if dir_filter_is_abs:
+                        if not proj_lower.startswith(dir_filter_norm):
+                            continue
+                    else:
+                        if dir_filter_norm not in proj_lower:
+                            continue
                 if search_lower:
-                    haystack = decoded.lower() + "\n" + extract_searchable_text(fpath)
+                    haystack = proj_dir.lower() + "\n" + extract_searchable_text(fpath)
                     if search_lower not in haystack:
                         continue
                 btime = get_birth_time(fpath)
                 session_id = f.replace(".jsonl", "")
-                meta = extract_session_meta(fpath, msg_index=msg_index)
-                sessions.append((btime, decoded, session_id, meta))
+                sessions.append((btime, proj_dir, session_id, meta))
     sessions.sort(reverse=True)
     return sessions
 
@@ -259,6 +266,10 @@ def main():
             else:
                 print(cmd)
             sys.exit(0)
+        if not os.path.isdir(proj_dir):
+            print(f"Original project directory no longer exists: {proj_dir}", file=sys.stderr)
+            print(f"Resume manually from any dir with: claude --resume {sid}", file=sys.stderr)
+            sys.exit(1)
         os.chdir(proj_dir)
         os.execvp("claude", ["claude", "--resume", sid])
 
