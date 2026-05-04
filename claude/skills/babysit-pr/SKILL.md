@@ -1,8 +1,8 @@
 ---
 name: babysit-pr
 description: Monitor the current branch's open PR for merge conflicts, failing checks, and unresolved bot comments (e.g. cursorbot), then fix the issues, push, and resolve the comments. Use with `/loop` for continuous monitoring.
-argument-hint: [pr-number]
-allowed-tools: Read, Edit, Write, Bash, Grep, Glob, Agent
+argument-hint: [pr-number] [--loop [N]] [--jira [PROJECT_KEY]]
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__getJiraIssue
 ---
 
 # Babysit PR — Fix Failing Checks & Resolve Bot Comments
@@ -13,10 +13,11 @@ Monitor an open pull request for failing CI checks and unresolved bot review com
 
 - PR number (optional) — Pass as a bare number (e.g., `/babysit-pr 123`). If omitted, detect from the current branch using `gh pr view --json number -q .number`.
 - `--loop [N]` (optional) — Maximum fix cycles before stopping. If N is omitted or `--loop` is not specified, defaults to 5. E.g., `/babysit-pr --loop 3` or `/babysit-pr 123 --loop`.
+- `--jira [PROJECT_KEY]` (optional) — Create a Jira ticket for the PR, prefix the PR title with the ticket key, then close and re-open the PR (to retrigger workflows that depend on the title). Runs once at the start. If `PROJECT_KEY` is omitted, ask the user which project to use. Skipped entirely when the flag is not passed. E.g., `/babysit-pr --jira PROJ` or `/babysit-pr 123 --jira`.
 
 ## Steps
 
-**IMPORTANT: Always execute steps 2–5 fully on every iteration. Do NOT shortcut by checking thread counts or combining queries to skip steps. The REST API queries in step 5 are the only reliable way to detect bot comments — GraphQL review thread counts will miss them.**
+**IMPORTANT: Always execute steps 3–6 fully on every iteration. Do NOT shortcut by checking thread counts or combining queries to skip steps. The REST API queries in step 6 are the only reliable way to detect bot comments — GraphQL review thread counts will miss them.**
 
 ### 1. Identify the PR
 
@@ -27,7 +28,44 @@ gh pr view --json number,url,headRefName,state -q '.'
 
 Confirm the PR is open. If not, stop and report.
 
-### 2. Check for merge conflicts
+### 2. Create Jira ticket and prefix PR title (only if `--jira` was passed)
+
+Skip this entire step if `--jira` was not passed. This step runs only once, on the first iteration — do not re-run it on loop iterations.
+
+1. Check whether the PR title already starts with a Jira-style key (e.g. `ABC-123:` or `ABC-123 -`). If it does, skip this step entirely and proceed to step 3.
+
+2. Determine the project key:
+   - If `--jira PROJECT_KEY` was passed, use that key.
+   - Otherwise, try to deduce it from repo context (in this order, stop at first hit):
+     1. Recent PR titles — `gh pr list --state all --limit 30 --json title -q '.[].title'` and grep for a `[A-Z]{2,10}-\d+` prefix. Use the most common project key.
+     2. Recent commit messages and branch names — `git log --oneline -100` and `git branch -a --sort=-committerdate | head -30`, same regex.
+     3. Mentions in `CLAUDE.md`, `README.md`, or `.github/` files.
+   - If exactly one project key is found, use it and tell the user ("Using Jira project `PROJ` based on recent PR titles").
+   - If none found or multiple plausible keys, call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` and `mcp__claude_ai_Atlassian__getVisibleJiraProjects` and ask the user which project to use.
+
+3. Create the Jira issue with `mcp__claude_ai_Atlassian__createJiraIssue`:
+   - `summary`: the current PR title
+   - `description`: include the PR URL and a one-line summary of the change (derive from the PR body / commit messages)
+   - `issueType`: `Task` (or whatever the project's default is — check with `mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata` if `Task` is rejected)
+   - Capture the new issue key (e.g. `PROJ-123`).
+
+4. Prefix the PR title with the new key:
+   ```bash
+   current_title=$(gh pr view <pr-number> --json title -q .title)
+   gh pr edit <pr-number> --title "<KEY>: $current_title"
+   ```
+
+5. Close and re-open the PR to retrigger any workflows that key off the title:
+   ```bash
+   gh pr close <pr-number>
+   gh pr reopen <pr-number>
+   ```
+
+6. Report the created ticket key and URL to the user, then proceed to step 3.
+
+If ticket creation fails (auth, missing project, etc.), report the error and ask the user how to proceed — do NOT silently continue without the prefix.
+
+### 3. Check for merge conflicts
 
 ```bash
 gh pr view --json mergeable,mergeStateStatus -q '.'
@@ -46,7 +84,7 @@ If the PR has merge conflicts (`mergeable` is `"CONFLICTING"` or `mergeStateStat
 
 If no merge conflicts, proceed to the next step.
 
-### 3. Wait for Cursor Bugbot to finish
+### 4. Wait for Cursor Bugbot to finish
 
 Before checking results, see if Cursor Bugbot (or similar bot checks) is still running:
 
@@ -70,17 +108,17 @@ If any Cursor Bugbot check is still in progress:
      fi
    done
    ```
-3. Once finished, proceed to step 4. The bot may have added new review comments that need to be addressed.
+3. Once finished, proceed to step 5. The bot may have added new review comments that need to be addressed.
 
-If no Cursor Bugbot check is running (or none exists), proceed immediately to step 4.
+If no Cursor Bugbot check is running (or none exists), proceed immediately to step 5.
 
-### 4. Check for failing checks
+### 5. Check for failing checks
 
 ```bash
 gh pr checks --json name,state,conclusion,link --jq '.[] | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .state == "FAILURE")'
 ```
 
-If there are no failing checks, report "All checks passing" and move to step 5 (bot comments).
+If there are no failing checks, report "All checks passing" and move to step 6 (bot comments).
 
 For each failing check:
 1. Read the check name and link to understand what failed.
@@ -97,7 +135,7 @@ Common check failures and how to fix them:
 - **go-coverage**: Fix failing Go tests.
 - **lint / typecheck**: Fix the reported issues in the source.
 
-### 5. Check for unresolved bot comments
+### 6. Check for unresolved bot comments
 
 ```bash
 # Get all review comments on the PR
@@ -161,11 +199,11 @@ gh api graphql -f query='
 '
 ```
 
-### 6. Loop until clean
+### 7. Loop until clean
 
-If fixes were pushed during this iteration, you MUST loop back to step 2 and repeat the full cycle — pushing triggers new Bugbot runs and CI checks that must be waited on before declaring the PR clean.
+If fixes were pushed during this iteration, you MUST loop back to step 3 and repeat the full cycle — pushing triggers new Bugbot runs and CI checks that must be waited on before declaring the PR clean. Do NOT re-run step 2 (Jira setup); that step runs once on the first iteration only.
 
-Only declare the PR clean after completing a full iteration of steps 2–5 where NO fixes were needed (no merge conflicts, no failing checks, no unresolved bot comments). Always run steps 2–5 completely each iteration — the REST API queries in step 5 are the ONLY way to reliably detect bot comments. Never skip step 5 or substitute it with a GraphQL thread count.
+Only declare the PR clean after completing a full iteration of steps 3–6 where NO fixes were needed (no merge conflicts, no failing checks, no unresolved bot comments). Always run steps 3–6 completely each iteration — the REST API queries in step 6 are the ONLY way to reliably detect bot comments. Never skip step 6 or substitute it with a GraphQL thread count.
 
 Stop looping if:
 - The max iteration count is reached (default 5). Report remaining issues to the user.
@@ -174,9 +212,10 @@ Stop looping if:
 
 Track the iteration count and report it (e.g., "Iteration 2/5").
 
-### 7. Report
+### 8. Report
 
 Summarize what was done:
+- Jira ticket created (key + URL), if `--jira` was used
 - Which checks were failing and how they were fixed
 - Which bot comments were addressed and how
 - Which bot comments were escalated to the user (with reason — should only be due to size/complexity)
