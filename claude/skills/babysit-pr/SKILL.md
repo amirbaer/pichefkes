@@ -154,7 +154,9 @@ For each unresolved bot comment:
 4. If the fix is too large or complex (e.g., requires a major refactor, touches many files, or has unclear trade-offs), ask the user for guidance instead of skipping.
 5. After applying fixes, stage, commit with a message referencing the bot feedback, and push.
 
-After pushing fixes, reply to each addressed bot comment explaining what was done (or why it's a false positive), then resolve the thread:
+After pushing fixes, reply to each addressed bot comment explaining what was done (or why it's a false positive), then resolve the thread.
+
+**IMPORTANT: Only resolve threads started by bots. Never resolve threads started by human reviewers — leave those for the human to resolve, even if you addressed the underlying issue.** When iterating over review threads, always check that the thread's first comment author matches a bot pattern before resolving.
 
 1. **Reply** to the comment with a short explanation of the fix (e.g., "Fixed: changed `remeidation` → `remediation` in coverage_report.py line 298, commit abc1234"):
 ```bash
@@ -165,9 +167,9 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body
 gh api repos/{owner}/{repo}/issues/{number}/comments -f body="Fixed: <explanation>"
 ```
 
-2. **Resolve** the review thread:
+2. **Resolve** the review thread — **only if the thread was started by a bot**:
 ```bash
-# First find the thread ID:
+# First find the thread ID, filtering to bot-authored threads only:
 gh api graphql -f query='
   query {
     repository(owner: "OWNER", name: "REPO") {
@@ -189,7 +191,9 @@ gh api graphql -f query='
   }
 '
 
-# Then resolve it:
+# Only resolve if the thread's first comment author matches a bot pattern
+# (login contains "bot", "cursor", "coderabbit", "copilot", "claude", etc.)
+# If the author is a human reviewer, do NOT resolve — leave it for them.
 gh api graphql -f query='
   mutation {
     resolveReviewThread(input: {threadId: "THREAD_NODE_ID"}) {
@@ -225,6 +229,7 @@ Summarize what was done:
 
 - **Never force-push.** Always create new commits for fixes.
 - **Address ALL bot comments.** Do not skip comments for being "out of scope" or "from the base branch." Only escalate to the user if the requested change is too large or complex to apply confidently.
+- **Never resolve human reviewer threads.** Only resolve review threads started by bots. Human reviewers' threads must be left for the human to resolve, even if the underlying issue was fixed.
 - **Respect the codebase patterns.** Read CLAUDE.md files in relevant directories before making changes.
 - **Keep commits atomic.** One commit per logical fix (e.g., separate "fix ruff format" from "fix Go test").
 - If you cannot fix a failure after 2 attempts, report it clearly so the user can intervene.
