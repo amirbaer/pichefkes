@@ -1,8 +1,8 @@
 ---
 name: babysit-pr
-description: Monitor the current branch's open PR for merge conflicts, failing checks, and unresolved bot comments (e.g. cursorbot), then fix the issues, push, and resolve the comments. Use with `/loop` for continuous monitoring.
-argument-hint: [pr-number] [--loop [N]] [--jira [PROJECT_KEY]]
-allowed-tools: Read, Edit, Write, Bash, Grep, Glob, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__getJiraIssue
+description: "Monitor the current branch's open PR for merge conflicts, failing checks, and unresolved bot comments (e.g. cursorbot), then fix the issues, push, and resolve the comments. Use with `/loop` for continuous monitoring."
+argument-hint: "[pr-number] [--loop [N]] [--jira [PROJECT_KEY]]"
+allowed-tools: "Read, Edit, Write, Bash, Grep, Glob, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__getJiraIssue"
 ---
 
 # Babysit PR — Fix Failing Checks & Resolve Bot Comments
