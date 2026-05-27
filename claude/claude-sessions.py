@@ -50,6 +50,7 @@ def _parse_user_msg(obj):
             b.get("text", "") for b in content if b.get("type") == "text"
         )
     msg = content.strip().split("\n")[0].strip()
+    msg = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", msg)
     msg = re.sub(r"^[➜$#>]\s*", "", msg)
     msg = re.sub(r"^\S+\s+git:\(.*?\)\s*[✗✓]*\s*", "", msg)
     return msg
@@ -75,7 +76,8 @@ def extract_session_meta(fpath, msg_index=None):
                 except json.JSONDecodeError:
                     continue
                 if obj.get("type") == "custom-title":
-                    custom_title = obj.get("customTitle", "")
+                    title = obj.get("customTitle", "")
+                    custom_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", title)
                 if obj.get("type") == "user":
                     msg = _parse_user_msg(obj)
                     if msg:
@@ -118,8 +120,8 @@ def get_birth_time(fpath):
     return getattr(st, "st_birthtime", st.st_mtime)
 
 
-def extract_searchable_text(fpath):
-    """Extract all searchable text from a session: title + all user messages."""
+def extract_searchable_text(fpath, deep=False):
+    """Extract all searchable text from a session: title + all user messages (+ assistant text if deep)."""
     parts = []
     try:
         with open(fpath, "r") as f:
@@ -136,12 +138,20 @@ def extract_searchable_text(fpath):
                     msg = _parse_user_msg(obj)
                     if msg:
                         parts.append(msg)
+                if deep and obj.get("type") == "assistant":
+                    content = obj.get("message", {}).get("content", "")
+                    if isinstance(content, list):
+                        for b in content:
+                            if b.get("type") == "text":
+                                parts.append(b.get("text", ""))
+                    elif isinstance(content, str):
+                        parts.append(content)
     except (OSError, UnicodeDecodeError):
         pass
     return "\n".join(parts).lower()
 
 
-def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, dir_filter=None):
+def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, dir_filter=None, deep=False):
     """Collect and sort all sessions."""
     search_lower = search.lower() if search else None
     dir_filter_norm = dir_filter.rstrip("/").lower() if dir_filter else None
@@ -168,12 +178,13 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, d
                         if dir_filter_norm not in proj_lower:
                             continue
                 if search_lower:
-                    haystack = proj_dir.lower() + "\n" + extract_searchable_text(fpath)
+                    haystack = proj_dir.lower() + "\n" + extract_searchable_text(fpath, deep=deep)
                     if search_lower not in haystack:
                         continue
                 btime = get_birth_time(fpath)
+                mtime = os.stat(fpath).st_mtime
                 session_id = f.replace(".jsonl", "")
-                sessions.append((btime, proj_dir, session_id, meta))
+                sessions.append((mtime, btime, proj_dir, session_id, meta))
     sessions.sort(reverse=True)
     return sessions
 
@@ -200,12 +211,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="List Claude Code sessions",
         epilog="Message selection: default=last, --first=first, +N=Nth from start, -N=Nth from end. "
-               "Use --open N to resume session at row N.",
+               "Pass a row number to resume that session.",
     )
-    parser.add_argument("n", nargs="?", type=int, default=None,
+    parser.add_argument("row", nargs="?", type=int, default=None,
+                        help="open session at this row number")
+    parser.add_argument("-n", "--limit", type=int, default=None,
                         help="max sessions to list (default: 20)")
-    parser.add_argument("--open", type=int, default=None, metavar="N",
-                        help="resume session at row N")
     parser.add_argument("--first", action="store_true", help="show first user message instead of last")
     parser.add_argument("--msg", type=int, default=None, metavar="N",
                         help="message index: +N from start (0-based), -N from end")
@@ -215,6 +226,8 @@ def main():
                         help="search sessions by title, user messages, and project path")
     parser.add_argument("--dir", "-d", type=str, default=None, metavar="PATH",
                         help="filter sessions by project directory (substring match)")
+    parser.add_argument("--deep", action="store_true",
+                        help="search assistant responses too (slower)")
     parser.add_argument("--auto", action="store_true",
                         help="include automated sessions (hidden by default)")
     args, unknown = parser.parse_known_args()
@@ -247,18 +260,18 @@ def main():
             dir_filter = expanded
         # else keep as-is for substring match
 
-    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search, dir_filter=dir_filter)
+    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search, dir_filter=dir_filter, deep=args.deep)
 
     default_limit = None if (args.search or args.dir) else 20
-    limit = args.n if args.n is not None else default_limit
-    get_row = args.open
+    limit = args.limit if args.limit is not None else default_limit
+    get_row = args.row
 
     if get_row is not None:
         idx = get_row - 1
         if idx < 0 or idx >= len(sessions):
             print(f"Invalid row {get_row}. Have {len(sessions)} sessions.", file=sys.stderr)
             sys.exit(1)
-        _, proj_dir, sid, _ = sessions[idx]
+        _, _, proj_dir, sid, _ = sessions[idx]
         if args.print_only:
             cmd = f'cd "{proj_dir}" && claude --resume {sid}'
             if sys.stdout.isatty():
@@ -279,23 +292,27 @@ def main():
 
     # Build rows
     rows = []
-    for i, (btime, proj_dir, sid, meta) in enumerate(display, 1):
-        ts = time.strftime("%b %d %H:%M", time.localtime(btime))
-        # Shorten path: replace home with ~
+    for i, (mtime, btime, proj_dir, sid, meta) in enumerate(display, 1):
+        created_ts = time.strftime("%b %d %H:%M", time.localtime(btime))
+        active_ts = time.strftime("%b %d %H:%M", time.localtime(mtime))
+        if time.strftime("%b %d", time.localtime(btime)) == time.strftime("%b %d", time.localtime(mtime)):
+            active_ts = time.strftime("%H:%M", time.localtime(mtime))
         short_dir = proj_dir.replace(home, "~", 1)
         short_hash = sid[:8]
-        rows.append((i, btime, ts, short_dir, short_hash, meta))
+        rows.append((i, mtime, btime, created_ts, active_ts, short_dir, short_hash, meta))
 
     # Compute column widths for alignment
     max_idx_w = len(str(len(rows)))
-    max_dir_len = max((len(r[3]) for r in rows), default=0)
+    max_created_len = max((len(r[3]) for r in rows), default=0)
+    max_active_len = max((len(r[4]) for r in rows), default=0)
+    max_dir_len = max((len(r[5]) for r in rows), default=0)
     max_counter_len = max(
-        (len(f"[{r[5]['shown']}/{r[5]['total']}]") for r in rows if r[5]["total"] > 0),
+        (len(f"[{r[7]['shown']}/{r[7]['total']}]") for r in rows if r[7]["total"] > 0),
         default=0,
     )
 
-    for row_idx, btime, ts, short_dir, short_hash, meta in rows:
-        age_hours = (now - btime) / 3600
+    for row_idx, mtime, btime, created_ts, active_ts, short_dir, short_hash, meta in rows:
+        age_hours = (now - mtime) / 3600
         title = meta["title"]
         prompt = meta["prompt"]
         total = meta["total"]
@@ -303,6 +320,8 @@ def main():
 
         summary = title or prompt or ""
         dir_pad = max_dir_len - len(short_dir)
+        created_pad = max_created_len - len(created_ts)
+        active_pad = max_active_len - len(active_ts)
 
         if total > 0:
             counter = f"[{shown}/{total}]"
@@ -311,13 +330,13 @@ def main():
         counter_pad = max_counter_len - len(counter)
 
         if not use_color:
-            line = f"{row_idx:>{max_idx_w}}  {ts}  {short_hash}  {short_dir}{' ' * dir_pad}"
+            line = f"{row_idx:>{max_idx_w}}  {created_ts}{' ' * created_pad} → {active_ts}{' ' * active_pad}  {short_hash}  {short_dir}{' ' * dir_pad}"
             if summary:
                 line += f"  {counter}{' ' * counter_pad}  {summary}"
             print(line)
             continue
 
-        # Time color by age
+        # Time color by age (based on last activity)
         if age_hours < 1:
             time_color = "\033[38;5;48m"   # bright green - just now
         elif age_hours < 6:
@@ -338,9 +357,12 @@ def main():
         dim = "\033[38;5;242m"            # dim comment
         title_color = "\033[38;5;215m"    # orange for custom titles
         counter_color = "\033[38;5;110m"  # soft blue
+        arrow_color = "\033[38;5;240m"    # dim arrow
 
         idx_str = f"{idx_color}{row_idx:>{max_idx_w}}{reset}"
-        time_str = f"{time_color}{ts}{reset}"
+        created_str = f"{dim}{created_ts}{reset}{' ' * created_pad}"
+        active_str = f"{time_color}{active_ts}{reset}{' ' * active_pad}"
+        arrow_str = f"{arrow_color}→{reset}"
         hash_str = f"{hash_color}{short_hash}{reset}"
         dir_str = f"{dir_color}{short_dir}{reset}{' ' * dir_pad}"
 
@@ -351,7 +373,7 @@ def main():
         else:
             comment = ""
 
-        print(f"{idx_str}  {time_str}  {hash_str}  {dir_str}{comment}")
+        print(f"{idx_str}  {created_str} {arrow_str} {active_str}  {hash_str}  {dir_str}{comment}")
 
 
 if __name__ == "__main__":
