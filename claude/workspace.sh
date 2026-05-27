@@ -169,6 +169,7 @@ EOF
 }
 
 wlist() {
+    local filter="$1"
     mkdir -p "$WORKSPACE_DIR"
 
     local ws_files=()
@@ -202,6 +203,12 @@ wlist() {
 
         name="$(basename "$ws_file" .ws)"
         local repo="$(basename "$dir")"
+
+        # Filter by repo name substring if provided
+        if [[ -n "$filter" && "$repo" != *"$filter"* ]]; then
+            continue
+        fi
+
         dir="${dir/#$HOME/~}"
 
         local short_date="" date_color="$dim"
