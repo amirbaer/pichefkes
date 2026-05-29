@@ -45,7 +45,8 @@ function workalready() {
 _workclone_dirs() {
   local dirs=()
   for dir in "$WORKCLONE_DIR"/*/; do
-    [[ -d "$dir/.git" ]] && dirs+=("$dir")
+    # strip trailing slash so "repo" sorts before "repo-1" under sort -V
+    [[ -d "$dir/.git" ]] && dirs+=("${dir%/}")
   done
   printf '%s\n' "${dirs[@]}" | sort -V
 }
@@ -56,13 +57,17 @@ function workls() {
     return 1
   fi
 
+  local filter="$1"
+
   local dim=$'\033[90m' cyan=$'\033[36m' rst=$'\033[0m'
   local green=$'\033[38;5;114m' yellow=$'\033[38;5;216m'
 
   # collect data first to compute column widths
   local names=() branches=() statuses=() dates=() date_colors=()
   while IFS= read -r dir; do
-    names+=("$(basename "$dir")")
+    local name="$(basename "$dir")"
+    [[ -n "$filter" && "$name" != *"$filter"* ]] && continue
+    names+=("$name")
     local branch=$(git -C "$dir" branch --show-current 2>/dev/null || echo "detached")
     branches+=("$branch")
     if [[ -n $(git -C "$dir" status --porcelain 2>/dev/null) ]]; then
@@ -125,13 +130,21 @@ function workls() {
 
 function workcd() {
   if [[ -z "$1" ]]; then
-    echo "Usage: workcd <index>"
+    echo "Usage: workcd [filter] <index>"
     return 1
   fi
 
-  local target_idx="$1"
+  local filter="" target_idx
+  if [[ -n "$2" ]]; then
+    filter="$1"
+    target_idx="$2"
+  else
+    target_idx="$1"
+  fi
+
   local idx=1
   while IFS= read -r dir; do
+    [[ -n "$filter" && "$(basename "$dir")" != *"$filter"* ]] && continue
     if [[ "$idx" -eq "$target_idx" ]]; then
       cd "$dir"
       return 0
