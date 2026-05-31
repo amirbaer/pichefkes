@@ -57,6 +57,12 @@ function workls() {
     return 1
   fi
 
+  # workls <filter> <num> acts like workcd <filter> <num>
+  if [[ -n "$2" ]]; then
+    workcd "$@"
+    return
+  fi
+
   local filter="$1"
 
   local dim=$'\033[90m' cyan=$'\033[36m' rst=$'\033[0m'
