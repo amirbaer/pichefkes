@@ -1,0 +1,10 @@
+{
+  "name": "hub-submit",
+  "version": "1.0.0",
+  "description": "Upload a Claude Code plugin or slash command to the Remedio AI Hub. Packages the files and opens a review PR in gytpol/ai-hub; nothing is published until merged.",
+  "author": {
+    "name": "Amir Baer",
+    "email": "amir.b@gytpol.com"
+  },
+  "keywords": ["ai-hub", "plugin", "upload", "publishing", "internal-tools"]
+}
