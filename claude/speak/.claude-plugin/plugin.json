@@ -1,0 +1,10 @@
+{
+  "name": "speak",
+  "version": "1.1.0",
+  "description": "Read the previous response (or given text) out loud with a neural voice. Supports pause/continue playback control and eli5/executive/tldr spoken summaries.",
+  "author": {
+    "name": "Amir Baer",
+    "email": "amir.b@gytpol.com"
+  },
+  "keywords": ["tts", "speech", "audio", "voice", "accessibility"]
+}
