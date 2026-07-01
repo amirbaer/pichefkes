@@ -9,6 +9,17 @@ import sys
 import time
 
 
+# Cache of parsed session metadata, keyed by session file path. Session files are
+# large (this machine has 1.4GB across ~8k files) and mostly immutable once a session
+# ends, so re-parsing every file on every run costs minutes on a cold disk. We cache
+# the cheap-to-store bits (title, cwd, automated flag, user-message first-lines) keyed
+# on the file's (mtime, size) and only re-parse files that actually changed.
+CACHE_VERSION = 1
+CACHE_PATH = os.path.join(os.path.expanduser("~"), ".claude", ".claude-sessions-cache.json")
+
+CTRL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def normalize(name):
     """Normalize a name the same way Claude encodes paths: replace non-alphanumeric with dash."""
     return re.sub(r"[^a-zA-Z0-9]", "-", name)
@@ -50,22 +61,29 @@ def _parse_user_msg(obj):
             b.get("text", "") for b in content if b.get("type") == "text"
         )
     msg = content.strip().split("\n")[0].strip()
-    msg = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", msg)
+    msg = CTRL_CHARS.sub("", msg)
     msg = re.sub(r"^[➜$#>]\s*", "", msg)
     msg = re.sub(r"^\S+\s+git:\(.*?\)\s*[✗✓]*\s*", "", msg)
     return msg
 
 
-def extract_session_meta(fpath, msg_index=None):
-    """Extract custom title, user messages, and cwd from a session file.
+def parse_session(fpath):
+    """Read a session file once and extract everything the listing/search needs.
 
-    msg_index: None = last message (default)
-               0 = first, 1 = second, ...  (from start)
-               -1 = last, -2 = second to last, ...  (from end)
+    Returns a dict with:
+      title     - custom title (control chars stripped), or ""
+      cwd       - first cwd seen in the session, or ""
+      automated - True if the session's first user message is non-interactive (entrypoint != 'cli')
+      msgs      - cleaned first-lines of every user message, in order
+
+    Only the *first line* of each user message is kept (matching the original
+    display/search behaviour), so this stays small even for huge sessions.
     """
-    all_msgs = []
-    custom_title = ""
+    title = ""
     cwd = ""
+    automated = False
+    automated_known = False
+    msgs = []
     try:
         with open(fpath, "r") as f:
             for line in f:
@@ -75,20 +93,33 @@ def extract_session_meta(fpath, msg_index=None):
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if obj.get("type") == "custom-title":
-                    title = obj.get("customTitle", "")
-                    custom_title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", title)
-                if obj.get("type") == "user":
+                obj_type = obj.get("type")
+                if obj_type == "custom-title":
+                    title = CTRL_CHARS.sub("", obj.get("customTitle", ""))
+                elif obj_type == "user":
+                    if not automated_known:
+                        automated = obj.get("entrypoint") != "cli"
+                        automated_known = True
                     msg = _parse_user_msg(obj)
                     if msg:
-                        all_msgs.append(msg)
+                        msgs.append(msg)
                 if not cwd:
                     line_cwd = obj.get("cwd")
                     if line_cwd:
                         cwd = line_cwd
     except (OSError, UnicodeDecodeError):
         pass
+    return {"title": title, "cwd": cwd, "automated": automated, "msgs": msgs}
 
+
+def meta_from_parsed(parsed, msg_index=None):
+    """Derive the display meta (title, chosen prompt, counts, cwd) from parsed data.
+
+    msg_index: None = last message (default)
+               0 = first, 1 = second, ...  (from start)
+               -1 = last, -2 = second to last, ...  (from end)
+    """
+    all_msgs = parsed["msgs"]
     total = len(all_msgs)
     user_msg = ""
     shown_idx = 0
@@ -106,22 +137,25 @@ def extract_session_meta(fpath, msg_index=None):
                 shown_idx = 0
 
     return {
-        "title": custom_title,
+        "title": parsed["title"],
         "prompt": user_msg[:80],
         "total": total,
         "shown": shown_idx + 1,  # 1-based for display
-        "cwd": cwd,
+        "cwd": parsed["cwd"],
     }
 
 
-def get_birth_time(fpath):
-    """Get file creation time, falling back to mtime if birthtime unavailable."""
-    st = os.stat(fpath)
-    return getattr(st, "st_birthtime", st.st_mtime)
+def searchable_from_parsed(parsed):
+    """Searchable text (title + user messages) for a non-deep search, lowercased."""
+    return "\n".join([parsed["title"]] + parsed["msgs"]).lower()
 
 
-def extract_searchable_text(fpath, deep=False):
-    """Extract all searchable text from a session: title + all user messages (+ assistant text if deep)."""
+def extract_assistant_text(fpath):
+    """Extract assistant text from a session for --deep search, lowercased.
+
+    Assistant output is the bulk of a session's bytes, so it's never cached; deep
+    search inherently re-reads the file.
+    """
     parts = []
     try:
         with open(fpath, "r") as f:
@@ -132,13 +166,7 @@ def extract_searchable_text(fpath, deep=False):
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if obj.get("type") == "custom-title":
-                    parts.append(obj.get("customTitle", ""))
-                if obj.get("type") == "user":
-                    msg = _parse_user_msg(obj)
-                    if msg:
-                        parts.append(msg)
-                if deep and obj.get("type") == "assistant":
+                if obj.get("type") == "assistant":
                     content = obj.get("message", {}).get("content", "")
                     if isinstance(content, list):
                         for b in content:
@@ -151,60 +179,152 @@ def extract_searchable_text(fpath, deep=False):
     return "\n".join(parts).lower()
 
 
-def collect_sessions(projects_dir, msg_index, include_auto=False, search=None, dir_filter=None, deep=False):
-    """Collect and sort all sessions."""
-    search_lower = search.lower() if search else None
-    dir_filter_norm = dir_filter.rstrip("/").lower() if dir_filter else None
-    dir_filter_is_abs = dir_filter_norm and os.path.isabs(dir_filter) if dir_filter else False
-    sessions = []
+def get_birth_time(st):
+    """Get file creation time from a stat result, falling back to mtime."""
+    return getattr(st, "st_birthtime", st.st_mtime)
+
+
+def load_cache(path):
+    """Load the parsed-session cache. Returns {} on any problem or version mismatch."""
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict) or data.get("version") != CACHE_VERSION:
+        return {}
+    entries = data.get("entries")
+    return entries if isinstance(entries, dict) else {}
+
+
+def save_cache(path, entries):
+    """Atomically write the cache (temp file + rename). Failures are non-fatal."""
+    tmp = path + ".tmp.%d" % os.getpid()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w") as f:
+            json.dump({"version": CACHE_VERSION, "entries": entries}, f)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def get_parsed(fpath, st, cache):
+    """Return parsed session data for fpath, using the cache when the file is unchanged.
+
+    Returns (parsed_dict, was_cached). On a miss, parses the file and stores the
+    result in `cache` (mutated in place).
+    """
+    if cache is not None:
+        entry = cache.get(fpath)
+        if entry and entry.get("mtime") == st.st_mtime and entry.get("size") == st.st_size:
+            return entry, True
+    parsed = parse_session(fpath)
+    if cache is not None:
+        cache[fpath] = {
+            "mtime": st.st_mtime,
+            "size": st.st_size,
+            "title": parsed["title"],
+            "cwd": parsed["cwd"],
+            "automated": parsed["automated"],
+            "msgs": parsed["msgs"],
+        }
+    return parsed, False
+
+
+def iter_session_files(projects_dir):
+    """Yield (fpath, session_id, decoded_project_dir) for every session file.
+
+    decode_project_path (which walks the filesystem) runs at most once per project,
+    and only for projects that actually contain sessions.
+    """
     for proj in os.listdir(projects_dir):
         proj_path = os.path.join(projects_dir, proj)
         if not os.path.isdir(proj_path):
             continue
-        decoded = decode_project_path(proj)
+        decoded = None
         for f in os.listdir(proj_path):
-            if f.endswith(".jsonl"):
-                fpath = os.path.join(proj_path, f)
-                if not include_auto and is_automated_session(fpath):
-                    continue
-                meta = extract_session_meta(fpath, msg_index=msg_index)
-                proj_dir = meta["cwd"] or decoded
-                if dir_filter_norm:
-                    proj_lower = proj_dir.rstrip("/").lower()
-                    if dir_filter_is_abs:
-                        if not proj_lower.startswith(dir_filter_norm):
-                            continue
-                    else:
-                        if dir_filter_norm not in proj_lower:
-                            continue
-                if search_lower:
-                    haystack = proj_dir.lower() + "\n" + extract_searchable_text(fpath, deep=deep)
-                    if search_lower not in haystack:
-                        continue
-                btime = get_birth_time(fpath)
-                mtime = os.stat(fpath).st_mtime
-                session_id = f.replace(".jsonl", "")
-                sessions.append((mtime, btime, proj_dir, session_id, meta))
-    sessions.sort(reverse=True)
-    return sessions
+            if not f.endswith(".jsonl"):
+                continue
+            if decoded is None:
+                decoded = decode_project_path(proj)
+            yield os.path.join(proj_path, f), f[: -len(".jsonl")], decoded
 
 
-def is_automated_session(fpath):
-    """Check if a session is non-interactive (entrypoint != 'cli')."""
-    try:
-        with open(fpath, "r") as f:
-            for line in f:
-                if not line.strip():
+def collect_sessions(projects_dir, msg_index, include_auto=False, search=None,
+                     dir_filter=None, deep=False, limit=None, cache=None):
+    """Collect and sort sessions (newest first).
+
+    When there is no search or dir filter and `limit` is a positive int, only the
+    newest `limit` matching sessions are parsed (lazy) — the rest are never opened.
+    A search/dir filter forces a full scan since every file must be examined.
+
+    Returns (sessions, seen_paths, misses):
+      sessions   - list of (mtime, btime, proj_dir, session_id, meta)
+      seen_paths - set of every session file that currently exists (for cache pruning)
+      misses     - number of files that had to be parsed (cache misses)
+    """
+    search_lower = search.lower() if search else None
+    dir_filter_norm = dir_filter.rstrip("/").lower() if dir_filter else None
+    dir_filter_is_abs = bool(dir_filter) and os.path.isabs(dir_filter)
+
+    # Cheap first pass: stat every file (metadata only, no reads) so we can sort by
+    # recency before deciding which files are worth parsing.
+    records = []  # (mtime, btime, st, fpath, session_id, decoded)
+    seen_paths = set()
+    for fpath, sid, decoded in iter_session_files(projects_dir):
+        try:
+            st = os.stat(fpath)
+        except OSError:
+            continue
+        seen_paths.add(fpath)
+        records.append((st.st_mtime, get_birth_time(st), st, fpath, sid, decoded))
+
+    # Newest first. Tie-break by btime then decoded dir then id; identical float
+    # mtimes across files are effectively impossible, so this matches the old order.
+    records.sort(key=lambda r: (r[0], r[1], r[5], r[4]), reverse=True)
+
+    full_scan = bool(search_lower) or bool(dir_filter_norm) or not isinstance(limit, int)
+
+    sessions = []
+    misses = 0
+    for mtime, btime, st, fpath, sid, decoded in records:
+        parsed, was_cached = get_parsed(fpath, st, cache)
+        if not was_cached:
+            misses += 1
+
+        if not include_auto and parsed["automated"]:
+            continue
+
+        meta = meta_from_parsed(parsed, msg_index=msg_index)
+        proj_dir = meta["cwd"] or decoded
+
+        if dir_filter_norm:
+            proj_lower = proj_dir.rstrip("/").lower()
+            if dir_filter_is_abs:
+                if not proj_lower.startswith(dir_filter_norm):
                     continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
+            else:
+                if dir_filter_norm not in proj_lower:
                     continue
-                if obj.get("type") == "user":
-                    return obj.get("entrypoint") != "cli"
-    except (OSError, UnicodeDecodeError):
-        pass
-    return False
+
+        if search_lower:
+            base = proj_dir.lower() + "\n" + searchable_from_parsed(parsed)
+            if search_lower in base:
+                pass
+            elif deep and search_lower in extract_assistant_text(fpath):
+                pass
+            else:
+                continue
+
+        sessions.append((mtime, btime, proj_dir, sid, meta))
+        if not full_scan and len(sessions) >= limit:
+            break
+
+    return sessions, seen_paths, misses
 
 
 def main():
@@ -230,6 +350,10 @@ def main():
                         help="search assistant responses too (slower)")
     parser.add_argument("--auto", action="store_true",
                         help="include automated sessions (hidden by default)")
+    parser.add_argument("--no-cache", action="store_true",
+                        help="bypass the metadata cache (always re-parse every file)")
+    parser.add_argument("--rebuild-cache", action="store_true",
+                        help="ignore the existing cache and rebuild it from scratch")
     args, unknown = parser.parse_known_args()
 
     # Support bare +N / -N without --msg
@@ -260,11 +384,31 @@ def main():
             dir_filter = expanded
         # else keep as-is for substring match
 
-    sessions = collect_sessions(projects_dir, msg_idx, include_auto=args.auto, search=args.search, dir_filter=dir_filter, deep=args.deep)
+    use_cache = not args.no_cache
+    cache = {} if (not use_cache or args.rebuild_cache) else load_cache(CACHE_PATH)
+    # `cache=None` disables lookups/stores entirely inside collect_sessions.
+    active_cache = cache if use_cache else None
 
     default_limit = None if (args.search or args.dir) else 20
     limit = args.limit if args.limit is not None else default_limit
     get_row = args.row
+
+    # For a row resume we scan fully: the row may exceed the display limit, and the
+    # "Have N sessions" error on a bad row must report the true total. This runs after
+    # a listing (cache warm), so the full scan is cheap.
+    collect_limit = None if get_row is not None else limit
+
+    sessions, seen_paths, misses = collect_sessions(
+        projects_dir, msg_idx, include_auto=args.auto, search=args.search,
+        dir_filter=dir_filter, deep=args.deep, limit=collect_limit, cache=active_cache,
+    )
+
+    # Persist the cache: prune entries for files that no longer exist, and write only
+    # when something actually changed (a parse happened or stale entries were dropped).
+    if use_cache:
+        pruned = {k: v for k, v in cache.items() if k in seen_paths}
+        if misses > 0 or len(pruned) != len(cache) or args.rebuild_cache:
+            save_cache(CACHE_PATH, pruned)
 
     if get_row is not None:
         idx = get_row - 1
