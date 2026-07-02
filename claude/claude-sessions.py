@@ -300,7 +300,17 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None,
             continue
 
         meta = meta_from_parsed(parsed, msg_index=msg_index)
-        proj_dir = meta["cwd"] or decoded
+        # `claude --resume <id>` finds a session under ~/.claude/projects/<normalize(cwd)>/,
+        # so the directory we display and cd into must re-encode to this session's project
+        # folder. meta["cwd"] is the *first* cwd in the session; if the session used /cd it
+        # can diverge from the folder (normalize won't match), so fall back to the decoded
+        # folder path, which always round-trips. Both normalize to the same folder for
+        # sessions that never changed directory, so this is a no-op there.
+        cwd = meta["cwd"]
+        if cwd and normalize(cwd) == normalize(decoded):
+            proj_dir = cwd
+        else:
+            proj_dir = decoded
 
         if dir_filter_norm:
             proj_lower = proj_dir.rstrip("/").lower()
