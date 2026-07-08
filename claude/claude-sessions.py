@@ -403,10 +403,16 @@ def main():
     limit = args.limit if args.limit is not None else default_limit
     get_row = args.row
 
-    # For a row resume we scan fully: the row may exceed the display limit, and the
-    # "Have N sessions" error on a bad row must report the true total. This runs after
-    # a listing (cache warm), so the full scan is cheap.
-    collect_limit = None if get_row is not None else limit
+    # For a row resume, parse only enough sessions to reach the requested row instead of
+    # scanning every file. A listing only warms the cache for the top ~limit sessions (not
+    # all of them), so scanning fully here is a cold re-parse of every session file — tens
+    # of thousands on a busy machine, which looks like a hang. Capping the scan at get_row
+    # keeps a valid resume fast; a row beyond the true total never reaches the cap, so the
+    # loop falls through to a full scan and the "Have N sessions" error stays accurate.
+    if get_row is not None and get_row > 0:
+        collect_limit = get_row
+    else:
+        collect_limit = limit
 
     sessions, seen_paths, misses = collect_sessions(
         projects_dir, msg_idx, include_auto=args.auto, search=args.search,
