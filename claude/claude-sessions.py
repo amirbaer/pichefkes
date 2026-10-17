@@ -7,15 +7,25 @@ import os
 import re
 import sys
 import time
+import zlib
 
 
 # Cache of parsed session metadata, keyed by session file path. Session files are
-# large (this machine has 1.4GB across ~8k files) and mostly immutable once a session
+# large (this machine has 28GB across ~34k files) and mostly immutable once a session
 # ends, so re-parsing every file on every run costs minutes on a cold disk. We cache
 # the cheap-to-store bits (title, cwd, automated flag, user-message first-lines) keyed
-# on the file's (mtime, size) and only re-parse files that actually changed.
+# on the file's (mtime, size) and only re-parse files that actually changed. A changed
+# file is append-only in practice, so its entry also records how far it was read ("off")
+# and a checksum of the bytes at both ends of that range ("sig"): the next run reads
+# only the appended tail, and falls back to a full re-parse if the checksums disagree.
 CACHE_VERSION = 1
 CACHE_PATH = os.path.join(os.path.expanduser("~"), ".claude", ".claude-sessions-cache.json")
+
+# Rewriting the whole cache (~0.3s for 20MB) costs more than re-reading a small appended
+# tail (~300MB/s), so a run that parsed less than this many bytes leaves the cache file
+# alone: the tails are re-read next time and the offsets catch up once enough has built up.
+SAVE_MIN_PARSED_BYTES = 32_000_000
+SIG_BYTES = 256
 
 CTRL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
@@ -25,6 +35,29 @@ def normalize(name):
     return re.sub(r"[^a-zA-Z0-9]", "-", name)
 
 
+# directory path -> {normalize(entry): entry} (first entry in listing order wins), or None
+# when the path is not a directory. Built once per directory per run: decode_project_path
+# used to re-list and re-normalize every entry of a directory for each project under it,
+# which cost minutes of CPU across thousands of project folders.
+_DIR_NAMES = {}
+
+
+def _dir_names(path):
+    names = _DIR_NAMES.get(path, False)
+    if names is False:
+        names = None
+        if os.path.isdir(path):
+            names = {}
+            try:
+                entries = os.listdir(path)
+            except OSError:
+                entries = []
+            for entry in entries:
+                names.setdefault(normalize(entry), entry)
+        _DIR_NAMES[path] = names
+    return names
+
+
 def decode_project_path(encoded):
     """Walk filesystem to resolve the ambiguous dash-encoded project path."""
     parts = encoded.lstrip("-").split("-")
@@ -32,20 +65,14 @@ def decode_project_path(encoded):
     i = 0
     while i < len(parts):
         matched = False
-        if os.path.isdir(resolved):
-            try:
-                entries = os.listdir(resolved)
-            except PermissionError:
-                entries = []
+        names = _dir_names(resolved)
+        if names:
             for end in range(len(parts), i, -1):
-                target = "-".join(parts[i:end])
-                for entry in entries:
-                    if normalize(entry) == target:
-                        resolved = os.path.join(resolved, entry)
-                        i = end
-                        matched = True
-                        break
-                if matched:
+                entry = names.get("-".join(parts[i:end]))
+                if entry is not None:
+                    resolved = os.path.join(resolved, entry)
+                    i = end
+                    matched = True
                     break
         if not matched:
             resolved = os.path.join(resolved, parts[i])
@@ -67,7 +94,75 @@ def _parse_user_msg(obj):
     return msg
 
 
-def parse_session(fpath):
+# Session lines are compact JSON (no spaces), so a line that matters can be recognised from
+# its raw bytes without decoding it: most of a session's bytes are attachment / assistant /
+# tool-result lines that never contribute to the listing. A marker only has to be a
+# superset test (a false positive just costs one json.loads; the real checks run on the
+# decoded object), and it cannot match inside string content, where quotes are escaped.
+_TYPE_USER = b'"type":"user"'
+_TYPE_TITLE = b'"type":"custom-title"'
+_TYPE_TOOL_RESULT = b'"type":"tool_result"'
+_TYPE_TEXT = b'"type":"text"'
+_KEY_CWD = b'"cwd"'
+# `": "` (quote, colon, space, quote) only occurs in JSON with spaces after its colons: in a
+# compact line a string value holding it is escaped (`\": \"`). A line that has it is not
+# in the format the markers above assume, so it is decoded in full like the old parser did.
+_SPACED = b'": "'
+
+
+def _feed(state, line):
+    """Fold one raw JSONL line into `state`; returns True if it was decoded as a JSON object.
+
+    A line is decoded only when it can change the state: a custom title, a user message
+    (except one made purely of tool results, which carries no prompt text once the
+    session's first user line has fixed `automated`), or, until a cwd has been seen,
+    any line mentioning one.
+    """
+    if line.find(_SPACED, 0, 512) < 0:
+        need_cwd = not state["cwd"] and _KEY_CWD in line
+        if _TYPE_USER in line:
+            if (state["known"] and not need_cwd
+                    and _TYPE_TOOL_RESULT in line and _TYPE_TEXT not in line):
+                return False
+        elif not need_cwd and _TYPE_TITLE not in line:
+            return False
+    try:
+        obj = json.loads(line)
+        if not isinstance(obj, dict):
+            return False
+        obj_type = obj.get("type")
+        if obj_type == "custom-title":
+            state["title"] = CTRL_CHARS.sub("", obj.get("customTitle", ""))
+        elif obj_type == "user":
+            if not state["known"]:
+                state["automated"] = obj.get("entrypoint") != "cli"
+                state["known"] = True
+            msg = _parse_user_msg(obj)
+            if msg:
+                state["msgs"].append(msg)
+        if not state["cwd"]:
+            line_cwd = obj.get("cwd")
+            if line_cwd:
+                state["cwd"] = line_cwd
+    except ValueError:  # JSONDecodeError, or bytes that are not valid UTF-8
+        return False
+    except (AttributeError, TypeError):  # a line shaped unlike a session record
+        return True
+    return True
+
+
+def _file_sig(f, off):
+    """Checksums of the first and last SIG_BYTES of the first `off` bytes of an open file."""
+    head_len = min(SIG_BYTES, off)
+    tail_start = max(0, off - SIG_BYTES)
+    f.seek(0)
+    head = f.read(head_len)
+    f.seek(tail_start)
+    tail = f.read(off - tail_start)
+    return [zlib.crc32(head), zlib.crc32(tail)]
+
+
+def parse_session(fpath, resume=None):
     """Read a session file once and extract everything the listing/search needs.
 
     Returns a dict with:
@@ -75,41 +170,49 @@ def parse_session(fpath):
       cwd       - first cwd seen in the session, or ""
       automated - True if the session's first user message is non-interactive (entrypoint != 'cli')
       msgs      - cleaned first-lines of every user message, in order
+      known     - True once the first user message has been seen (`automated` is settled)
+      off, sig  - only when the parse can be continued later: the byte offset just past the
+                  last newline-terminated line consumed, and checksums of the bytes before it
+      read      - bytes read from the file by this call
 
     Only the *first line* of each user message is kept (matching the original
     display/search behaviour), so this stays small even for huge sessions.
+
+    resume: a cache entry from an earlier parse of this same append-only file (validated by
+    `_can_resume`); parsing continues at its offset instead of at byte 0, extending its msgs.
     """
-    title = ""
-    cwd = ""
-    automated = False
-    automated_known = False
-    msgs = []
+    if resume is not None:
+        state = {k: resume[k] for k in ("title", "cwd", "automated", "known", "msgs")}
+        start = resume["off"]
+    else:
+        state = {"title": "", "cwd": "", "automated": False, "known": False, "msgs": []}
+        start = 0
+    off = start
+    sig = None
     try:
-        with open(fpath, "r") as f:
+        with open(fpath, "rb") as f:
+            if start:
+                f.seek(start)
             for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                obj_type = obj.get("type")
-                if obj_type == "custom-title":
-                    title = CTRL_CHARS.sub("", obj.get("customTitle", ""))
-                elif obj_type == "user":
-                    if not automated_known:
-                        automated = obj.get("entrypoint") != "cli"
-                        automated_known = True
-                    msg = _parse_user_msg(obj)
-                    if msg:
-                        msgs.append(msg)
-                if not cwd:
-                    line_cwd = obj.get("cwd")
-                    if line_cwd:
-                        cwd = line_cwd
-    except (OSError, UnicodeDecodeError):
-        pass
-    return {"title": title, "cwd": cwd, "automated": automated, "msgs": msgs}
+                if line.endswith(b"\n"):
+                    _feed(state, line)
+                    off += len(line)
+                elif _feed(state, line):
+                    # A final line with no newline yet that already decodes as JSON: it is in
+                    # `state`, but a later run could not tell where it ends, so don't resume.
+                    off = None
+                    break
+            read = f.tell() - start
+            if off:
+                sig = _file_sig(f, off)
+    except OSError:
+        off = None
+        read = 0
+    state["read"] = read
+    if off and sig:
+        state["off"] = off
+        state["sig"] = sig
+    return state
 
 
 def meta_from_parsed(parsed, msg_index=None):
@@ -202,8 +305,11 @@ def save_cache(path, entries):
     tmp = path + ".tmp.%d" % os.getpid()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        # dumps, not dump: only dumps takes the C encoder, dump streams ~1.5M chunks through
+        # the pure-Python one (3s of a 4s run for a 20MB cache).
+        data = json.dumps({"version": CACHE_VERSION, "entries": entries}, separators=(",", ":"))
         with open(tmp, "w") as f:
-            json.dump({"version": CACHE_VERSION, "entries": entries}, f)
+            f.write(data)
         os.replace(tmp, path)
     except OSError:
         try:
@@ -212,27 +318,57 @@ def save_cache(path, entries):
             pass
 
 
+def _can_resume(entry, fpath, st):
+    """True if a changed file is still the file `entry` was parsed from, grown at the end.
+
+    The entry must carry a resume point, the file must be at least that long, and the bytes
+    at both ends of the already-parsed range must still checksum the same (a rewrite that
+    drops or edits earlier lines shifts them).
+    """
+    off, sig = entry.get("off"), entry.get("sig")
+    if (not isinstance(off, int) or off <= 0 or st.st_size < off
+            or not isinstance(sig, list) or len(sig) != 2
+            or not isinstance(entry.get("msgs"), list)
+            or not all(k in entry for k in ("title", "cwd", "automated", "known"))):
+        return False
+    try:
+        with open(fpath, "rb") as f:
+            return _file_sig(f, off) == sig
+    except OSError:
+        return False
+
+
 def get_parsed(fpath, st, cache):
     """Return parsed session data for fpath, using the cache when the file is unchanged.
 
-    Returns (parsed_dict, was_cached). On a miss, parses the file and stores the
-    result in `cache` (mutated in place).
+    Returns (parsed_dict, parsed_bytes): parsed_bytes is None for a cache hit, else the
+    number of bytes read to bring the entry up to date. A file that only grew is read from
+    where the cached parse stopped. On a miss the entry in `cache` is replaced.
     """
+    resume = None
     if cache is not None:
         entry = cache.get(fpath)
-        if entry and entry.get("mtime") == st.st_mtime and entry.get("size") == st.st_size:
-            return entry, True
-    parsed = parse_session(fpath)
+        if entry:
+            if entry.get("mtime") == st.st_mtime and entry.get("size") == st.st_size:
+                return entry, None
+            if _can_resume(entry, fpath, st):
+                resume = entry
+    parsed = parse_session(fpath, resume)
     if cache is not None:
-        cache[fpath] = {
+        entry = {
             "mtime": st.st_mtime,
             "size": st.st_size,
             "title": parsed["title"],
             "cwd": parsed["cwd"],
             "automated": parsed["automated"],
+            "known": parsed["known"],
             "msgs": parsed["msgs"],
         }
-    return parsed, False
+        if "off" in parsed:
+            entry["off"] = parsed["off"]
+            entry["sig"] = parsed["sig"]
+        cache[fpath] = entry
+    return parsed, parsed["read"]
 
 
 def iter_session_files(projects_dir):
@@ -258,14 +394,15 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None,
                      dir_filter=None, deep=False, limit=None, cache=None):
     """Collect and sort sessions (newest first).
 
-    When there is no search or dir filter and `limit` is a positive int, only the
-    newest `limit` matching sessions are parsed (lazy) — the rest are never opened.
-    A search/dir filter forces a full scan since every file must be examined.
+    When `limit` is an int, the scan stops at the newest `limit` matching sessions — the
+    rest are never opened, with or without a search/dir filter (newest first, so they are
+    the same sessions a full scan would put first). Without a limit every file is examined.
 
-    Returns (sessions, seen_paths, misses):
-      sessions   - list of (mtime, btime, proj_dir, session_id, meta)
-      seen_paths - set of every session file that currently exists (for cache pruning)
-      misses     - number of files that had to be parsed (cache misses)
+    Returns (sessions, seen_paths, misses, parsed_bytes):
+      sessions     - list of (mtime, btime, proj_dir, session_id, meta)
+      seen_paths   - set of every session file that currently exists (for cache pruning)
+      misses       - number of files that had to be parsed (cache misses)
+      parsed_bytes - bytes read from session files to serve those misses
     """
     search_lower = search.lower() if search else None
     dir_filter_norm = dir_filter.rstrip("/").lower() if dir_filter else None
@@ -287,26 +424,27 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None,
     # mtimes across files are effectively impossible, so this matches the old order.
     records.sort(key=lambda r: (r[0], r[1], r[5], r[4]), reverse=True)
 
-    full_scan = bool(search_lower) or bool(dir_filter_norm) or not isinstance(limit, int)
+    full_scan = not isinstance(limit, int)
 
     sessions = []
     misses = 0
+    parsed_bytes = 0
     for mtime, btime, st, fpath, sid, decoded in records:
-        parsed, was_cached = get_parsed(fpath, st, cache)
-        if not was_cached:
+        parsed, cost = get_parsed(fpath, st, cache)
+        if cost is not None:
             misses += 1
+            parsed_bytes += cost
 
         if not include_auto and parsed["automated"]:
             continue
 
-        meta = meta_from_parsed(parsed, msg_index=msg_index)
         # `claude --resume <id>` finds a session under ~/.claude/projects/<normalize(cwd)>/,
         # so the directory we display and cd into must re-encode to this session's project
-        # folder. meta["cwd"] is the *first* cwd in the session; if the session used /cd it
+        # folder. parsed["cwd"] is the *first* cwd in the session; if the session used /cd it
         # can diverge from the folder (normalize won't match), so fall back to the decoded
         # folder path, which always round-trips. Both normalize to the same folder for
         # sessions that never changed directory, so this is a no-op there.
-        cwd = meta["cwd"]
+        cwd = parsed["cwd"]
         if cwd and normalize(cwd) == normalize(decoded):
             proj_dir = cwd
         else:
@@ -330,11 +468,12 @@ def collect_sessions(projects_dir, msg_index, include_auto=False, search=None,
             else:
                 continue
 
+        meta = meta_from_parsed(parsed, msg_index=msg_index)
         sessions.append((mtime, btime, proj_dir, sid, meta))
         if not full_scan and len(sessions) >= limit:
             break
 
-    return sessions, seen_paths, misses
+    return sessions, seen_paths, misses, parsed_bytes
 
 
 def main():
@@ -414,16 +553,18 @@ def main():
     else:
         collect_limit = limit
 
-    sessions, seen_paths, misses = collect_sessions(
+    sessions, seen_paths, misses, parsed_bytes = collect_sessions(
         projects_dir, msg_idx, include_auto=args.auto, search=args.search,
         dir_filter=dir_filter, deep=args.deep, limit=collect_limit, cache=active_cache,
     )
 
     # Persist the cache: prune entries for files that no longer exist, and write only
-    # when something actually changed (a parse happened or stale entries were dropped).
+    # when something worth keeping changed (stale entries were dropped, or enough was
+    # parsed that re-reading it next time would cost more than rewriting the cache).
     if use_cache:
         pruned = {k: v for k, v in cache.items() if k in seen_paths}
-        if misses > 0 or len(pruned) != len(cache) or args.rebuild_cache:
+        if (parsed_bytes >= SAVE_MIN_PARSED_BYTES or len(pruned) != len(cache)
+                or args.rebuild_cache):
             save_cache(CACHE_PATH, pruned)
 
     if get_row is not None:
