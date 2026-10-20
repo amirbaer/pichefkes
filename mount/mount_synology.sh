@@ -43,11 +43,15 @@ SYN_PW="$(security find-generic-password -s $SYN_PW_KEY -w $SYN_PW_KEYCHAIN)"
 
 for folder in `echo $FOLDERS | tr ';' ' '`; do
     echo -n "working on '$folder': "
-    if ! /sbin/mount | grep -q "$SYN_HN/$folder"; then
+    # match on mount point, so shares mounted under any hostname (Sasson, Sasson.local, IP) are detected
+    if ! /sbin/mount | grep -qF " on $SYN_MP/$folder ("; then
         mkdir -p "$SYN_MP/$folder"
         #/sbin/mount -t afp -o browse,nosuid,nodev "afp://$SYN_USER:$SYN_PW@$SYN_HN.local/$folder" "$SYN_MP/$folder"
-        /sbin/mount -t smbfs "smb://$SYN_USER:$SYN_PW@$SYN_HN/$folder" "$SYN_MP/$folder"
-        echo "mounted"
+        if /sbin/mount -t smbfs "smb://$SYN_USER:$SYN_PW@$SYN_HN/$folder" "$SYN_MP/$folder"; then
+            echo "mounted"
+        else
+            echo "failed"
+        fi
     else
         echo "already mounted"
     fi
